@@ -24,11 +24,22 @@ import numpy as np
 VN_FONT_FILE = "/System/Library/Fonts/Supplemental/Arial.ttf"
 VN_FONT_NAME = "ocrfont"
 
-# ponytail: hardcoded tới đúng thư mục dự án này, giống cách
-# TranslationRunner.swift hardcode đường dẫn PythonEngine — phù hợp cho
-# công cụ dev chạy trên 1 máy. Cần `swift build` chạy ít nhất 1 lần để
-# binary này tồn tại.
-DEFAULT_OCR_BINARY = "/Users/cuonghoang/PDF Tools/.build/debug/ocr_cli"
+def _default_ocr_binary():
+    """Ưu tiên `ocr_cli` đóng gói cạnh app (`Contents/MacOS/ocr_cli`, xem
+    scripts/package_app.sh — PythonEngine nằm ở `Contents/Resources/
+    PythonEngine` khi đã đóng gói); nếu không có (chạy dev) thì suy ra
+    project root từ vị trí file này và tìm `.build/debug/ocr_cli` (cần
+    `swift build` chạy ít nhất 1 lần)."""
+    engine_dir = os.path.dirname(os.path.abspath(__file__))
+    contents_dir = os.path.dirname(os.path.dirname(engine_dir))
+    bundled = os.path.join(contents_dir, "MacOS", "ocr_cli")
+    if os.path.exists(bundled):
+        return bundled
+    project_root = os.path.dirname(engine_dir)
+    return os.path.join(project_root, ".build", "debug", "ocr_cli")
+
+
+DEFAULT_OCR_BINARY = _default_ocr_binary()
 
 # Nếu tổng số ký tự chữ thật trích được từ trang ít hơn ngưỡng này, coi
 # trang đó là "dạng scan" (không có lớp chữ đáng kể) và chạy OCR. Không

@@ -28,6 +28,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RESOURCES/PythonEngine"
 
 cp "$BUILD_DIR/$APP_NAME" "$MACOS/$APP_NAME"
+cp "$BUILD_DIR/ocr_cli" "$MACOS/ocr_cli"
 
 echo "==> Tạo AppIcon.icns"
 ICONSET=$(mktemp -d)/AppIcon.iconset
