@@ -6,6 +6,9 @@ on:
   push:
     tags: ["v*.*.*"]
 
+permissions:
+  contents: write # GITHUB_TOKEN mặc định chỉ đọc -> cần quyền ghi để tạo Release
+
 jobs:
   build-and-release:
     runs-on: macos-latest
