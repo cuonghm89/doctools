@@ -358,6 +358,11 @@ Entry point: `main()` (đọc `--config`, gọi `process_pdf()`).
   `pdf_convert.py::convert_to_pptx()`.
 
 ### ocr_pdf.py (OCR trang scan bằng Vision framework)
+- `_default_ocr_binary()` — suy ra đường dẫn `ocr_cli`: ưu tiên
+  `Contents/MacOS/ocr_cli` cạnh app đã đóng gói (`scripts/package_app.sh`),
+  fallback `<project root>/.build/debug/ocr_cli` (suy từ `__file__`) khi
+  chạy dev. Gán vào hằng `DEFAULT_OCR_BINARY` (module-level, chạy 1 lần lúc
+  import) — không còn hardcode path theo máy cụ thể.
 - `_estimate_font_size(text, width, height)` — ước lượng cỡ chữ ưu tiên
   theo chiều rộng thật (đo bằng `fitz.Font.text_length`), fallback chiều
   cao. Gọi bởi: `ocr_page()`.
