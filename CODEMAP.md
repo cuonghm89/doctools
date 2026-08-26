@@ -123,9 +123,10 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
   `scripts/package_app.sh`), fallback suy ra project root từ `#filePath`
   lúc build (chạy dev qua `swift run`/Xcode). Không còn hardcode path theo
   máy/tài khoản cụ thể.
-- `resolvedPythonPath` (static) — đường dẫn `.venv/bin/python3` trong
-  `PythonEngine/` (tính từ `engineDir`) nếu tồn tại, else fallback `python3`
-  từ `PATH`.
+- `resolvedPythonPath` (static) — ưu tiên `Resources/PythonRuntime/bin/
+  python3` (runtime Python riêng đóng gói sẵn deps qua `scripts/
+  package_app.sh` — người dùng không cần cài gì), else `.venv/bin/python3`
+  trong `PythonEngine/` (dev), else fallback `python3` từ `PATH`.
 - `run<Config: Encodable>(scriptName:config:onEvent:onFinish:)` — ghi config
   ra file JSON tạm, spawn `Process` chạy `python3 <script> --config <file>`,
   đọc stdout từng dòng qua `parseEvent`, gọi callback `onEvent`/`onFinish`.

@@ -60,8 +60,10 @@ No manual setup needed: `PythonProcess.engineDir` (in
 `PythonEngine`'s location — from the app bundle's `Resources/PythonEngine`
 when running a packaged `.app` (see [Packaging](#packaging--đóng-gói-thành-app)
 below), or from the project source tree when running via `swift run`/Xcode.
-It then prefers `PythonEngine/.venv/bin/python3` if that venv exists, else
-falls back to whatever `python3` is on `PATH`.
+For the interpreter, `PythonProcess.resolvedPythonPath` prefers the bundled
+`Resources/PythonRuntime/bin/python3` (packaged `.app`, deps preinstalled —
+see [Packaging](#packaging--đóng-gói-thành-app)), else `PythonEngine/.venv/bin/python3`
+if that dev venv exists, else falls back to whatever `python3` is on `PATH`.
 
 ## 4. Get API keys
 
@@ -118,16 +120,16 @@ translation; Gemini key is optional but recommended once you're near the
 
 Builds a release binary, generates `AppIcon.icns` from
 `Sources/CPDFGear/Resources/AppIcon.png`, bundles `PythonEngine`'s `.py`
-files (no `.venv`, no `test_*.py`) into `Resources/`, writes `Info.plist`,
-ad-hoc code-signs, and zips the result to `dist/CPDFGear-<version>-macos.zip`.
+files (no `.venv`, no `test_*.py`) plus a **self-contained Python 3.12
+runtime** (downloaded from
+[astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone),
+deps from `requirements.txt` pre-installed into it) into `Resources/`,
+writes `Info.plist`, ad-hoc code-signs, and zips the result to
+`dist/CPDFGear-<version>-macos.zip`. ~130MB zipped, macOS Apple Silicon only.
 
-Người nhận app (đồng nghiệp) cần tự cài Python 3 + dependencies — app
-**không** đóng gói sẵn 1 Python runtime (không dùng PyInstaller/tương tự,
-`.venv` gốc 252MB và không portable giữa máy):
-
-```bash
-python3 -m pip install -r PythonEngine/requirements.txt
-```
+Người nhận app **không cần cài gì cả** — Python + toàn bộ thư viện
+(pymupdf/pdf2docx/python-docx/python-pptx) đã nằm sẵn trong `.app`, không
+đụng gì tới Python hệ thống của họ.
 
 Vì chưa có Apple Developer ID nên app chỉ được ký **ad-hoc** (không
 notarize) — lần đầu mở trên máy khác, macOS Gatekeeper sẽ chặn; mở bằng

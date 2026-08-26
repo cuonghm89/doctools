@@ -22,11 +22,19 @@ final class PythonProcess {
         return projectRoot.appendingPathComponent("PythonEngine").path
     }()
     private static let venvPython = engineDir + "/.venv/bin/python3"
+    /// Python runtime riêng đóng gói cạnh app (xem scripts/package_app.sh) —
+    /// đã cài sẵn pymupdf/pdf2docx/... nên người dùng không cần cài gì cả.
+    private static let bundledPython = Bundle.main.resourceURL?
+        .appendingPathComponent("PythonRuntime/bin/python3").path
 
-    /// Ưu tiên dùng venv riêng của dự án (đã cài pymupdf/requests/...);
-    /// nếu không thấy thì dùng "python3" bất kỳ có trong PATH của người dùng.
+    /// Thứ tự ưu tiên: runtime đóng gói (app đã đóng gói qua
+    /// scripts/package_app.sh) > venv riêng của dự án (chạy dev) > "python3"
+    /// bất kỳ có trong PATH của người dùng.
     static var resolvedPythonPath: String {
-        FileManager.default.fileExists(atPath: venvPython) ? venvPython : "python3"
+        if let bundledPython, FileManager.default.fileExists(atPath: bundledPython) {
+            return bundledPython
+        }
+        return FileManager.default.fileExists(atPath: venvPython) ? venvPython : "python3"
     }
 
     private var process: Process?
