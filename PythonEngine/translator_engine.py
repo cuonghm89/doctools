@@ -20,6 +20,7 @@ from collections import Counter
 import fitz  # PyMuPDF
 
 from router import TranslationRouter, is_table_lines
+from code_blocks import translate_units_with_code_awareness
 from paragraphs import (
     merge_paragraph_blocks, is_bullet_text, block_font_style,
     block_text_color as block_text_color_ints,
@@ -288,7 +289,7 @@ def process_pdf(input_pdf, output_pdf, router, max_pages=0):
         # cho mỗi đoạn văn/bullet — đây là đòn bẩy chính để giảm thời gian
         # xử lý với tài liệu dài.
         units, spans = build_translation_units(groups)
-        batch_results = router.translate_batch(units) if units else []
+        batch_results = translate_units_with_code_awareness(units, router) if units else []
 
         for group, (start, count) in zip(groups, spans):
             first_block = group["sub_blocks"][0]

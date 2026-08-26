@@ -26,6 +26,7 @@ PDF Tools/
     ├── pdf_convert.py                     # xuất Word/PPTX từ PDF (độc lập pipeline dịch)
     ├── convert_cli.py                     # CLI wrapper cho pdf_convert.py
     ├── router.py                          # gọi API DeepL/Gemini
+    ├── code_blocks.py                     # nhận diện đoạn code, chỉ dịch chú thích bên trong
     ├── paragraphs.py                      # gộp/tách khối chữ thành đoạn văn
     ├── ocr_pdf.py                         # OCR trang scan (gọi ocr_cli)
     ├── .venv/                             # venv riêng cho PythonEngine (gitignored)
@@ -33,7 +34,7 @@ PDF Tools/
 scripts/
 └── package_app.sh                         # build .app đóng gói (icon .icns, Info.plist, PythonEngine) + zip
 .github/workflows/
-├── ci.yml                                 # swift build + pytest mỗi push/PR
+├── ci.yml                                 # swift build + self-check PythonEngine mỗi push/PR
 └── release.yml                            # build & publish GitHub Release khi push tag v*.*.*
 ```
 
@@ -60,6 +61,7 @@ graph LR
         OT[office_translate.py]
         PC[pdf_convert.py]
         RO[router.py]
+        CB[code_blocks.py]
         PA[paragraphs.py]
         OC[ocr_pdf.py]
         TCLI[convert_cli.py]
@@ -75,10 +77,13 @@ graph LR
     PP -. subprocess .-> TE
     PP -. subprocess .-> TCLI
     TE --> RO
+    TE --> CB
     TE --> PA
     TE --> OC
     TE --> OT
     OT --> RO
+    OT --> CB
+    CB --> RO
     PC --> PA
     PC --> OC
     PC --> TE
@@ -96,8 +101,11 @@ graph LR
   đuôi file: `.pdf` → `process_pdf()` (xóa/vẽ lại từng khối chữ bằng
   redaction); `.docx`/`.pptx` → `translate_docx()`/`translate_pptx()`
   (`office_translate.py` — thay trực tiếp text trong run có sẵn, giữ
-  nguyên mọi định dạng khác vì không đụng XML nào khác). Mỗi file xong gọi
-  `onItemDone` để `ContentView` ghi vào `HistoryStore`.
+  nguyên mọi định dạng khác vì không đụng XML nào khác). Cả 2 nhánh gọi
+  `translate_units_with_code_awareness()` (`code_blocks.py`) thay vì gọi
+  thẳng `router.translate_batch()` — đoạn nào trông giống code (Python/C/
+  .../...) chỉ dịch phần CHÚ THÍCH bên trong, phần code giữ nguyên 100%.
+  Mỗi file xong gọi `onItemDone` để `ContentView` ghi vào `HistoryStore`.
 - **Xuất Word/PPTX** (hàng đợi nhiều file): `ContentView` →
   `ConversionRunner.start(inputURLs:)` → `processNext()` →
   `PythonProcess.run()` (subprocess) → `convert_cli.py --config` → `main()` →

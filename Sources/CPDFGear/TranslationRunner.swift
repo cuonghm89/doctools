@@ -111,6 +111,7 @@ final class TranslationRunner: ObservableObject {
             var engineLabel = engine == "deepl" ? "DeepL router"
                 : engine == "gemini" ? "Gemini fallback"
                 : engine == "skipped" ? "bỏ qua 1 đoạn, giữ nguyên bản gốc"
+                : engine == "code" ? "đoạn code — chỉ dịch chú thích, giữ nguyên code"
                 : engine
             if engine == "gemini", let detail {
                 // DeepL đã thử và fail trước khi rơi xuống Gemini — hiện lý

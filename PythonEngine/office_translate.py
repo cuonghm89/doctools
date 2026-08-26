@@ -36,6 +36,7 @@ from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.util import Emu, Pt as PptxPt
 
 from translator_engine import emit, VN_FONT_DIR
+from code_blocks import translate_units_with_code_awareness
 
 # Tiếng Việt dài hơn tiếng Anh (~20-30%, có khi hơn với câu ngắn) — khác
 # PDF (khung pixel cố định, fit_and_draw() tự co/giãn/cắt), .docx/.pptx
@@ -183,7 +184,10 @@ def _translate_paragraphs(paragraph_specs, router, page, total, pt_class):
     texts = [_paragraph_text(p) for p, _in_table in paragraph_specs]
     unit_indices = [i for i, t in enumerate(texts) if t.strip()]
     units = [(texts[i], False) for i in unit_indices]
-    results = router.translate_batch(units, enforce_length_guard=False) if units else []
+    results = (
+        translate_units_with_code_awareness(units, router, enforce_length_guard=False)
+        if units else []
+    )
 
     for para_idx, result in zip(unit_indices, results):
         translated, engine, deepl_error, item_error = result

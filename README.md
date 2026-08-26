@@ -96,6 +96,10 @@ của DeepL.
 - **Chữ tiếng Việt**: vẽ bằng font hệ thống `Arial.ttf`
   (`/System/Library/Fonts/Supplemental/`), vì font `helv` có sẵn của
   PyMuPDF không có dấu tiếng Việt.
+- **Đoạn code không bị dịch** (`code_blocks.py`): nếu tài liệu chứa 1 đoạn
+  mã nguồn (Python/C/Java/JS/...), phần code giữ nguyên 100%, chỉ chú
+  thích (`# ...`, `// ...`, `-- ...`) bên trong được dịch. Nhận diện bằng
+  heuristic (từ khoá + cú pháp phổ biến) — xem [Giới hạn đã biết](#giới-hạn-đã-biết-cố-ý-không-phải-bug).
 
 ## Giới hạn đã biết (cố ý, không phải bug)
 
@@ -104,6 +108,10 @@ của DeepL.
   Gemini, nhưng sẽ phân loại sai vài trường hợp. Thay bằng công cụ nhận
   diện bảng thật (vd. `pdfplumber`) nếu việc này quan trọng với tài liệu
   của bạn.
+- Nhận diện code (`is_code_snippet`) cũng là heuristic, không phải parser
+  thật cho từng ngôn ngữ: comment nằm trong 1 chuỗi ký tự dài/nhiều dòng có
+  thể bị tách nhầm, và comment khối nhiều dòng (`/* ... */` tràn dòng,
+  `<!-- -->`) không được xử lý — dòng đó giữ nguyên, không dịch.
 - API key được lưu trong `UserDefaults` (không phải Keychain) — ổn cho
   dùng cá nhân local, không phù hợp cho bản đưa cho người khác dùng.
 - Khung redaction giãn xuống dưới khi tràn chữ đôi khi có thể đè lên dòng

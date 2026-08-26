@@ -113,7 +113,10 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
   lý file kế tiếp (đệ quy tuần tự cho tới hết hàng đợi).
 - `applyEvent(_:)` (private, gọi từ closure `onEvent`) — parse JSON
   progress/done/error, cập nhật `@Published` state + `items[currentIndex]
-  .status`; sự kiện "done" gọi `onItemDone?(input, output)`.
+  .status`; sự kiện "done" gọi `onItemDone?(input, output)`. Nhãn hiển thị
+  theo `engine`: "deepl"/"gemini"/"skipped"/"code" (đoạn code — chỉ dịch
+  chú thích, xem `code_blocks.py`) có nhãn tiếng Việt riêng, giá trị khác
+  hiện nguyên văn.
 - `cancel()` — gọi `PythonProcess.cancel()`, set item hiện tại `.failed`.
 
 ### ConversionRunner.swift (ObservableObject)
@@ -203,9 +206,10 @@ Entry point: `main()` (đọc `--config`, gọi `process_pdf()`).
 - `process_pdf(input_pdf, output_pdf, router, max_pages=0)` — hàm chính của
   pipeline dịch. Gọi: `ensure_text_layer()` (ocr_pdf.py),
   `merge_paragraph_blocks()` (paragraphs.py), `page_image_rects()`,
-  `build_translation_units()`, `router.translate_batch()` (router.py),
-  `intersects_image()`, `growth_ceiling()`, `local_bg_color()`,
-  `fit_and_draw()`. Gọi bởi: `main()`.
+  `build_translation_units()`, `translate_units_with_code_awareness()`
+  (code_blocks.py — thay cho gọi thẳng `router.translate_batch()`, xem
+  CODEMAP mục code_blocks.py), `intersects_image()`, `growth_ceiling()`,
+  `local_bg_color()`, `fit_and_draw()`. Gọi bởi: `main()`.
 - `main()` — đọc `--config`, tạo `TranslationRouter`, TỰ NHẬN DIỆN định
   dạng theo đuôi file `input_pdf` (bất kể tên trường, chỉ là 1 path chuỗi):
   `.pdf` → `process_pdf()`; `.docx` → `translate_docx()`; `.pptx` →
@@ -251,7 +255,9 @@ Entry point: `main()` (đọc `--config`, gọi `process_pdf()`).
   trong ô bảng hay không đều gửi router với `is_table=False` như nhau, vì
   bảng .docx/.pptx là bảng THẬT, không cần heuristic `is_table_lines()`).
   Gộp text mọi đoạn thành 1 batch, gọi
-  `router.translate_batch(units, enforce_length_guard=False)` 1 lần — TẮT
+  `translate_units_with_code_awareness(units, router,
+  enforce_length_guard=False)` (code_blocks.py — thay cho gọi thẳng
+  `router.translate_batch()`, xem CODEMAP mục code_blocks.py) 1 lần — TẮT
   guard "phình quá dài thì giữ bản gốc" của router (guard đó chỉ đúng cho
   PDF, khung pixel cố định không co giãn được; docx/pptx tự co chữ ở đây
   thay vì bỏ dịch, bật guard sẽ tạo tiêu đề/đoạn văn nửa Anh nửa Việt) —
@@ -303,6 +309,46 @@ Entry point: `main()` (đọc `--config`, gọi `process_pdf()`).
   `_translate_paragraphs(..., pt_class=pptx.util.Pt)`,
   `_iter_pptx_tables()`, `_grow_table_rows_to_fit()`. Gọi bởi: `main()`
   (translator_engine.py).
+
+### code_blocks.py (nhận diện đoạn code, chỉ dịch chú thích)
+Dùng chung bởi cả `translator_engine.py` (PDF) và `office_translate.py`
+(.docx/.pptx) — theo yêu cầu: đoạn mã nguồn trong tài liệu KHÔNG được dịch,
+chỉ chú thích trong code mới dịch.
+
+- `_is_code_line(line)` — 1 dòng có "trông giống code" không, dựa trên tổ
+  hợp: từ khoá code (`_CODE_KEYWORDS` — CỐ Ý loại `if`/`for`/`while`/
+  `return`/`import`/... vì đây là từ tiếng Anh thường mở đầu câu văn xuôi
+  thật, dùng riêng sẽ nhận nhầm; từ khoá 1 mình cần thêm dấu `(` hoặc kết
+  thúc bằng `:` mới tính), câu lệnh `import`/`from...import`
+  (`_CODE_IMPORT_RE`, khá đặc trưng nên tự nó đủ), 1 dòng chỉ gồm lệnh gọi
+  hàm (`_CODE_CALL_RE`) hoặc phép gán đơn giản (`_CODE_ASSIGN_RE`), kết
+  thúc bằng `;{}` (`_CODE_LINE_ENDING_RE`), hoặc cú pháp đặc trưng `=>`/
+  `->`/`::`/`#include`/`<?php` (`_CODE_LINE_SYNTAX_RE`, tự nó đủ).
+- `is_code_snippet(text)` — tỉ lệ dòng "giống code" (qua `_is_code_line`)
+  trên tổng số dòng không rỗng ≥ `CODE_LINE_RATIO_THRESHOLD` (0.5). Gọi
+  bởi: `translate_units_with_code_awareness()`.
+- `_find_comment_marker(line)` — vị trí marker comment đầu tiên (`#`, `//`,
+  `--`) trên 1 dòng, bỏ qua marker nằm trong chuỗi ký tự (kiểm tra thô: số
+  dấu nháy `"`/`'` trước đó phải chẵn — `_quote_parity_ok()`). KHÔNG xử lý
+  comment khối nhiều dòng (`/* ... */` tràn dòng, `<!-- -->`) — dòng đó giữ
+  nguyên, không dịch.
+- `split_code_comments(text)` — tách `text` thành `(template, [comment_texts])`;
+  `template` giữ nguyên 100% phần code, thay phần chú thích bằng placeholder
+  `\x00{i}\x00`. Gọi bởi: `translate_units_with_code_awareness()`.
+- `reassemble_code_comments(template, translated_comments)` — thay từng
+  placeholder bằng chú thích đã dịch (dùng `.replace()`, KHÔNG dùng
+  `.format()` trên cả `template` — code thật có thể chứa `{`/`}` literal,
+  `.format()` sẽ vỡ). Gọi bởi: `translate_units_with_code_awareness()`.
+- `translate_units_with_code_awareness(units, router, **translate_kwargs)`
+  — wrapper quanh `router.translate_batch()`, CÙNG SHAPE input/output (list
+  `(text, is_table)` → list `(bản_dịch, engine, deepl_error, item_error)`,
+  không đổi gì ở phía gọi ngoài việc đổi tên hàm). Unit nào `is_code_snippet`
+  thì tách riêng: mọi chú thích của MỌI unit code gộp thành 1 batch dịch
+  riêng (`comment_units`), phần code không bao giờ gửi qua DeepL/Gemini.
+  Unit code KHÔNG có chú thích nào thì trả thẳng `(text_gốc, "skip", None,
+  None)` — không tốn quota. Unit dịch được gắn `engine="code"` (UI hiển thị
+  riêng, xem `TranslationRunner.swift`). Gọi bởi: `process_pdf()`
+  (translator_engine.py), `_translate_paragraphs()` (office_translate.py).
 
 ### router.py (gọi API dịch)
 - `_session_with_retries()` — `requests.Session` có `Retry` (429/5xx).
