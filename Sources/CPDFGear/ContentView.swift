@@ -3,8 +3,17 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @AppStorage("deeplApiKey") private var deeplApiKey: String = ""
-    @AppStorage("geminiApiKey") private var geminiApiKey: String = ""
+    // Lưu trong Keychain (không phải UserDefaults) — xem KeychainStore.swift.
+    // Bắt đầu rỗng, nạp bất đồng bộ ở .onAppear (loadApiKeysFromKeychain)
+    // thay vì gọi KeychainStore.load() thẳng trong initializer: macOS có
+    // thể bật hộp thoại xin mật khẩu xin quyền Keychain (vd sau khi đóng
+    // gói lại app — chữ ký ad-hoc đổi mỗi lần build), hộp thoại đó chờ
+    // phản hồi TRÊN CHÍNH luồng gọi — gọi trên main thread lúc init sẽ
+    // treo cứng cả cửa sổ app (không hiện ra) cho tới khi người dùng bấm
+    // hộp thoại. Đã tái hiện + xác nhận bằng cách chạy app thật.
+    @State private var deeplApiKey: String = ""
+    @State private var geminiApiKey: String = ""
+    @State private var isLoadingApiKeys = true
     @AppStorage("maxPages") private var maxPages: Int = 0
 
     @State private var queue: [URL] = []
@@ -15,6 +24,7 @@ struct ContentView: View {
     @StateObject private var runner = TranslationRunner()
     @StateObject private var converter = ConversionRunner()
     @StateObject private var history = HistoryStore()
+    @StateObject private var updateChecker = UpdateChecker()
 
     private var canStart: Bool {
         !queue.isEmpty && !deeplApiKey.isEmpty && !runner.isRunning && !converter.isRunning
@@ -28,6 +38,9 @@ struct ContentView: View {
         ScrollView {
             VStack(spacing: 20) {
                 header
+                if let latestVersion = updateChecker.latestVersion {
+                    updateBanner(latestVersion: latestVersion)
+                }
                 dropZone
                 queueList
                 settingsCard
@@ -51,7 +64,54 @@ struct ContentView: View {
                     history.add(kind: kind, input: input, output: output)
                 }
             }
+            updateChecker.check()
+            loadApiKeysFromKeychain()
         }
+        // Package.swift đặt platform tối thiểu macOS 13 — dùng overload 1
+        // tham số (`onChange(of:perform:)`), overload 2 tham số
+        // (oldValue/newValue) chỉ có từ macOS 14.
+        .onChange(of: deeplApiKey) { newValue in
+            guard !isLoadingApiKeys else { return }
+            KeychainStore.save("deeplApiKey", value: newValue)
+        }
+        .onChange(of: geminiApiKey) { newValue in
+            guard !isLoadingApiKeys else { return }
+            KeychainStore.save("geminiApiKey", value: newValue)
+        }
+    }
+
+    /// Đọc Keychain trên background thread rồi gán lại @State trên main —
+    /// tránh treo UI nếu macOS cần bật hộp thoại xin quyền (xem comment ở
+    /// khai báo `deeplApiKey` phía trên).
+    private func loadApiKeysFromKeychain() {
+        Task.detached {
+            let deepl = KeychainStore.load("deeplApiKey")
+            let gemini = KeychainStore.load("geminiApiKey")
+            await MainActor.run {
+                deeplApiKey = deepl
+                geminiApiKey = gemini
+                isLoadingApiKeys = false
+            }
+        }
+    }
+
+    private func updateBanner(latestVersion: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundStyle(Color.accentColor)
+            Text("Đã có bản mới v\(latestVersion)")
+                .font(.callout)
+            Spacer()
+            Button("Tải về") {
+                if let url = updateChecker.releaseURL {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.1)))
     }
 
     // MARK: - Phần đầu (header)

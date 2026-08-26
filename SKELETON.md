@@ -17,7 +17,9 @@ PDF Tools/
 │   │   ├── PythonProcess.swift            #   helper subprocess dùng chung
 │   │   ├── QueueItem.swift                #   trạng thái 1 file trong hàng đợi (dùng chung 2 runner)
 │   │   ├── HistoryStore.swift             #   lịch sử file đã dịch/xuất (UserDefaults JSON)
-│   │   └── QuotaTracker.swift             #   đọc lại quota DeepL đã dùng (usage_tracker.json)
+│   │   ├── QuotaTracker.swift             #   đọc lại quota DeepL đã dùng (usage_tracker.json)
+│   │   ├── KeychainStore.swift            #   lưu/đọc API key qua Keychain macOS
+│   │   └── UpdateChecker.swift            #   hỏi GitHub Releases xem có bản mới không
 │   └── ocr_cli/
 │       └── main.swift                     # binary OCR riêng (Vision framework)
 └── PythonEngine/                          # engine xử lý PDF/Word/PPTX, chạy qua subprocess

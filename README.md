@@ -100,6 +100,11 @@ của DeepL.
   mã nguồn (Python/C/Java/JS/...), phần code giữ nguyên 100%, chỉ chú
   thích (`# ...`, `// ...`, `-- ...`) bên trong được dịch. Nhận diện bằng
   heuristic (từ khoá + cú pháp phổ biến) — xem [Giới hạn đã biết](#giới-hạn-đã-biết-cố-ý-không-phải-bug).
+- **API key** (`KeychainStore.swift`): lưu trong Keychain macOS, không phải
+  UserDefaults/plain text.
+- **Kiểm tra bản mới** (`UpdateChecker.swift`): mỗi lần mở app đã đóng gói,
+  tự hỏi GitHub Releases xem có bản mới hơn không (chỉ báo, không tự tải/
+  cài) — hiện 1 banner nhỏ với nút "Tải về" nếu có.
 
 ## Giới hạn đã biết (cố ý, không phải bug)
 
@@ -112,8 +117,13 @@ của DeepL.
   thật cho từng ngôn ngữ: comment nằm trong 1 chuỗi ký tự dài/nhiều dòng có
   thể bị tách nhầm, và comment khối nhiều dòng (`/* ... */` tràn dòng,
   `<!-- -->`) không được xử lý — dòng đó giữ nguyên, không dịch.
-- API key được lưu trong `UserDefaults` (không phải Keychain) — ổn cho
-  dùng cá nhân local, không phù hợp cho bản đưa cho người khác dùng.
+- API key được lưu trong **Keychain** (`KeychainStore.swift`, không còn
+  `UserDefaults`/plain text). Vì app chỉ ký ad-hoc (chưa có Apple Developer
+  ID), chữ ký đổi mỗi lần đóng gói lại → macOS coi mỗi bản release là "app
+  khác", có thể bật hộp thoại xin **mật khẩu đăng nhập Mac** để cấp quyền
+  Keychain lần đầu bản đó chạm tới key đã lưu — không phải mỗi lần mở app,
+  chỉ 1 lần/bản release (bấm "Always Allow"). Có Developer ID thật (chữ ký
+  ổn định qua mọi bản) sẽ hết hẳn trường hợp này.
 - Khung redaction giãn xuống dưới khi tràn chữ đôi khi có thể đè lên dòng
   bên dưới ở trang quá dày đặc — chấp nhận được với mục tiêu giữ 95% độ
   trung thực bố cục, không phải pixel-perfect mọi trang.

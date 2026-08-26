@@ -26,15 +26,31 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
 
 ### ContentView.swift
 - Sở hữu `@StateObject runner: TranslationRunner`, `@StateObject converter:
-  ConversionRunner`, `@StateObject history: HistoryStore`, `@State queue:
-  [URL]` (hàng đợi file chờ xử lý, sửa được khi chưa chạy).
+  ConversionRunner`, `@StateObject history: HistoryStore`, `@StateObject
+  updateChecker: UpdateChecker`, `@State queue: [URL]` (hàng đợi file chờ
+  xử lý, sửa được khi chưa chạy).
+- `deeplApiKey`/`geminiApiKey` (`@State`, bắt đầu rỗng) — lưu thật ở
+  Keychain (`KeychainStore.swift`), KHÔNG dùng `@AppStorage` (UserDefaults)
+  nữa. Nạp bất đồng bộ qua `loadApiKeysFromKeychain()` ở `.onAppear`, không
+  nạp thẳng trong initializer — macOS có thể bật hộp thoại xin mật khẩu xin
+  quyền Keychain (đặc biệt sau mỗi lần đóng gói lại, chữ ký ad-hoc đổi mỗi
+  build khiến macOS coi là "app khác" cần hỏi lại quyền); gọi trên main
+  thread lúc init sẽ treo cứng cả cửa sổ (không hiện ra) cho tới khi người
+  dùng phản hồi — đã tái hiện + xác nhận bằng cách chạy app thật, fix bằng
+  cách nạp trên background thread (`Task.detached`) rồi gán lại `@State`
+  qua `MainActor.run`. `isLoadingApiKeys` chặn `.onChange` tự ghi ngược lại
+  Keychain giá trị vừa đọc xong.
 - `canStart` — chặn khi `queue` rỗng/thiếu DeepL key/runner/converter đang
   chạy. `canConvert` — chặn khi `pdfsInQueue` rỗng (xuất Word/PPTX chỉ nhận
   input PDF) hoặc runner/converter đang chạy.
-- `body` → ghép các view con: `header`, `dropZone`, `queueList`,
+- `body` → ghép các view con: `header`, `updateBanner(latestVersion:)` (chỉ
+  hiện khi `updateChecker.latestVersion != nil`), `dropZone`, `queueList`,
   `settingsCard`, `statusArea`, `startButton`, `convertButtons`,
   `conversionStatusArea`, `historyCard`. `.onAppear` gắn `runner.onItemDone`
-  / `converter.onItemDone` để ghi vào `history`.
+  / `converter.onItemDone` để ghi vào `history`, gọi `updateChecker.check()`
+  và `loadApiKeysFromKeychain()`.
+- `updateBanner(latestVersion:)` — banner nhỏ, nút "Tải về" mở
+  `updateChecker.releaseURL` bằng `NSWorkspace.shared.open()`.
 - `dropZone` — nhận nhiều file thả cùng lúc, PDF/`.docx`/`.pptx` (dịch hỗ
   trợ cả 3 — xem `office_translate.py`; lọc theo `Self.supportedExtensions`
   trong `onDrop`, loop qua mọi `provider`), hoặc bấm "Chọn file..." →
@@ -71,6 +87,33 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
 - Gọi `runner.start(inputURLs: queue, ...)` khi bấm nút dịch (mọi định
   dạng trong hàng đợi); `converter.start(inputURLs: pdfsInQueue, ...)` khi
   bấm Xuất Word/PowerPoint (chỉ file PDF).
+
+### KeychainStore.swift
+- `service` = `"dev.cuonghoang.cpdfgear"` (cố định, độc lập với Bundle ID
+  thật của process — dev qua `swift run` không có Info.plist nên không có
+  Bundle ID ổn định để dựa vào).
+- `load(_:)` — đọc Keychain qua `readKeychain(_:)`; nếu rỗng, di trú 1 lần
+  từ UserDefaults (giá trị `@AppStorage` cũ trước khi chuyển sang Keychain,
+  cùng tên key) — `save()` vào Keychain rồi `removeObject` khỏi
+  UserDefaults, không còn lưu trùng ở 2 nơi. Gọi bởi:
+  `ContentView.loadApiKeysFromKeychain()`.
+- `save(_:value:)` — `value` rỗng thì `SecItemDelete`; khác rỗng thì thử
+  `SecItemAdd`, nếu đã tồn tại (`errSecDuplicateItem`) thì `SecItemUpdate`
+  thay vào đó. Gọi bởi: `load()` (di trú), `ContentView` qua `.onChange` khi
+  người dùng sửa ô nhập key.
+- `readKeychain(_:)` (private) — `SecItemCopyMatching`, trả `nil` nếu không
+  tìm thấy/bị từ chối quyền (KHÔNG throw — người gọi tự fallback sang rỗng).
+
+### UpdateChecker.swift (ObservableObject)
+- `check()` — bỏ qua nếu KHÔNG có `CFBundleShortVersionString` trong
+  Info.plist (tức đang chạy dev qua `swift run`, không có gì để so sánh).
+  Gọi GitHub API `repos/cuonghm89/doctools/releases/latest`, so `tag_name`
+  (bỏ tiền tố `v`) với version hiện tại qua `isNewer(_:than:)`; nếu mới hơn,
+  set `latestVersion`/`releaseURL` (`@Published`, `ContentView` hiện
+  `updateBanner`). Không tự tải/cài gì — chỉ báo, người dùng tự bấm "Tải
+  về" mở trang Release. Gọi bởi: `ContentView.body` (`.onAppear`).
+- `isNewer(_:than:)` (static, private) — so từng phần số `"x.y.z"`, phần
+  thiếu coi là 0.
 
 ### QueueItem.swift
 - `QueueItemStatus` (enum: pending/running/done(URL)/failed(String)),
