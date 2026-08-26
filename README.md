@@ -1,34 +1,33 @@
 # C-PDF Gear
 
-SwiftUI macOS app that drives a Python (PyMuPDF) engine to translate PDFs to
-Vietnamese in place — same layout, same images/vectors, DeepL first with a
-Gemini fallback.
+Ứng dụng macOS viết bằng SwiftUI, điều khiển 1 engine Python (PyMuPDF) để
+dịch PDF sang tiếng Việt ngay tại chỗ — giữ nguyên bố cục, hình ảnh/vector
+gốc, ưu tiên DeepL với Gemini dự phòng.
 
-## Project layout
+## Cấu trúc dự án
 
 ```
-Package.swift                          SwiftUI app (opens directly in Xcode)
+Package.swift                          Manifest SPM, mở trực tiếp bằng Xcode
 Sources/CPDFGear/
-  CPDFGearApp.swift                    App entry point
-  ContentView.swift                    Drag&drop UI, settings, progress
-  TranslationRunner.swift              Launches the Python engine as a subprocess
+  CPDFGearApp.swift                    Entry point của app
+  ContentView.swift                    UI kéo-thả, cài đặt, tiến độ
+  TranslationRunner.swift              Chạy Python engine dưới dạng subprocess
 PythonEngine/
-  translator_engine.py                 CLI entry: PDF -> PDF, layout-preserving
-  router.py                            DeepL/Gemini smart routing + quota tracker
-  test_router.py                       Self-check (no network), run directly
+  translator_engine.py                 CLI entry: PDF -> PDF, giữ nguyên bố cục
+  router.py                            Định tuyến thông minh DeepL/Gemini + theo dõi quota
+  test_router.py                       Self-check (không cần mạng), chạy trực tiếp
   requirements.txt
-  .venv/                               Already created & populated for you (gitignored)
+  .venv/                               Đã tạo & cài sẵn (gitignored)
 scripts/
-  package_app.sh                       Build .app bundle + zip for release
+  package_app.sh                       Đóng gói .app + zip để release
 .github/workflows/
-  ci.yml                               swift build + pytest on every push/PR
-  release.yml                          Build & publish a GitHub Release on tag push
+  ci.yml                               swift build + self-check Python mỗi push/PR
+  release.yml                          Build & đăng GitHub Release khi push tag
 ```
 
-## 1. Python engine setup
+## 1. Cài đặt Python engine
 
-A virtualenv is already set up at `PythonEngine/.venv`. To recreate it from
-scratch:
+Đã có sẵn 1 virtualenv tại `PythonEngine/.venv`. Muốn tạo lại từ đầu:
 
 ```bash
 cd "PythonEngine"
@@ -36,96 +35,95 @@ python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
 ```
 
-Sanity-check the router logic (no network calls, no PDF needed):
+Kiểm tra nhanh logic router (không gọi mạng, không cần PDF):
 
 ```bash
 ./.venv/bin/python test_router.py
 ```
 
-## 2. Run the app
+## 2. Chạy app
 
-Open `Package.swift` in Xcode (double-click it, or `open Package.swift`),
-pick the `CPDFGear` scheme and **My Mac**, then Run (⌘R).
+Mở `Package.swift` bằng Xcode (double-click, hoặc `open Package.swift`),
+chọn scheme `CPDFGear` và **My Mac**, rồi Run (⌘R).
 
-Or from the terminal:
+Hoặc chạy từ terminal:
 
 ```bash
 swift run CPDFGear
 ```
 
-## 3. Python interpreter resolution
+## 3. Cách app tự tìm Python
 
-No manual setup needed: `PythonProcess.engineDir` (in
-[`PythonProcess.swift`](Sources/CPDFGear/PythonProcess.swift)) auto-resolves
-`PythonEngine`'s location — from the app bundle's `Resources/PythonEngine`
-when running a packaged `.app` (see [Packaging](#packaging--đóng-gói-thành-app)
-below), or from the project source tree when running via `swift run`/Xcode.
-For the interpreter, `PythonProcess.resolvedPythonPath` prefers the bundled
-`Resources/PythonRuntime/bin/python3` (packaged `.app`, deps preinstalled —
-see [Packaging](#packaging--đóng-gói-thành-app)), else `PythonEngine/.venv/bin/python3`
-if that dev venv exists, else falls back to whatever `python3` is on `PATH`.
+Không cần cấu hình gì thêm: `PythonProcess.engineDir` (trong
+[`PythonProcess.swift`](Sources/CPDFGear/PythonProcess.swift)) tự nhận diện
+vị trí `PythonEngine` — lấy từ `Resources/PythonEngine` trong bundle khi
+chạy 1 `.app` đã đóng gói (xem [Đóng gói thành .app](#đóng-gói-thành-app) bên
+dưới), hoặc từ cây thư mục source khi chạy qua `swift run`/Xcode.
 
-## 4. Get API keys
+Về interpreter, `PythonProcess.resolvedPythonPath` ưu tiên runtime đóng gói
+sẵn tại `Resources/PythonRuntime/bin/python3` (app đã đóng gói, deps đã cài
+sẵn — xem [Đóng gói thành .app](#đóng-gói-thành-app)), rồi tới
+`PythonEngine/.venv/bin/python3` nếu venv dev đó tồn tại, cuối cùng fallback
+về bất kỳ `python3` nào có trong `PATH`.
 
-- **DeepL**: https://www.deepl.com/pro-api — a free key ends in `:fx` and
-  gets routed to the free endpoint automatically; a paid key uses the pro
-  endpoint.
-- **Gemini** (fallback for tables, quota overflow, or DeepL errors):
+## 4. Lấy API key
+
+- **DeepL**: https://www.deepl.com/pro-api — key miễn phí kết thúc bằng
+  `:fx` sẽ tự động dùng endpoint free; key trả phí dùng endpoint pro.
+- **Gemini** (dự phòng cho bảng biểu, vượt quota, hoặc DeepL lỗi):
   https://aistudio.google.com/apikey
 
-Paste both into the Settings panel. DeepL key is required to start a
-translation; Gemini key is optional but recommended once you're near the
-500,000 char/month DeepL free quota.
+Dán cả 2 key vào panel Cài đặt. Key DeepL bắt buộc để bắt đầu dịch; key
+Gemini không bắt buộc nhưng nên có khi gần chạm quota free 500.000 ký tự
+của DeepL.
 
-## How it works
+## Cách hoạt động
 
-- **Router** (`router.py`): tracks DeepL usage in
-  `~/Library/Application Support/CPDFGear/usage_tracker.json`,
-  reset automatically each calendar month. Plain-text blocks under quota go
-  to DeepL; table-shaped blocks, over-quota text, or any DeepL error go to
-  Gemini 1.5 Flash.
-- **Layout preservation** (`translator_engine.py`): each page's text blocks
-  are read via `page.get_text("dict")` (exact bbox + font size). The old
-  text is removed with a real PDF redaction (`add_redact_annot` +
-  `apply_redactions`, restricted to text only — images and vector graphics
-  are explicitly excluded), then the translated text is redrawn at the same
-  box with `insert_textbox`.
-- **Dynamic Canvas**: font size shrinks step-by-step (down to
-  `original_size * Font Scale Factor`) until the translated text's
-  word-wrapped layout fits the original box, measured via an uncommitted
-  `Shape` (no ghost text left behind). If even the minimum size still needs
-  more vertical room, the box grows downward rather than silently dropping
-  text.
-- **Vietnamese glyphs**: text is drawn with the system's `Arial.ttf`
-  (`/System/Library/Fonts/Supplemental/`), since PyMuPDF's built-in `helv`
-  font has no Vietnamese diacritics.
+- **Router** (`router.py`): gọi thẳng API `/v2/usage` thật của DeepL để lấy
+  số đã dùng/hạn mức mỗi lần bắt đầu dịch (không tự đếm bằng cache local
+  nữa). Khối văn bản thường trong quota đi DeepL; khối dạng bảng, vượt
+  quota, hoặc DeepL lỗi thì chuyển sang Gemini (`gemini-flash-latest`).
+- **Giữ nguyên bố cục** (`translator_engine.py`): từng khối chữ trên trang
+  được đọc qua `page.get_text("dict")` (bbox + cỡ chữ chính xác). Chữ cũ bị
+  xoá bằng redaction PDF thật (`add_redact_annot` + `apply_redactions`, chỉ
+  áp dụng cho chữ — hình ảnh và vector graphics được loại trừ rõ ràng), rồi
+  chữ đã dịch được vẽ lại đúng vị trí đó bằng `insert_textbox`.
+- **Dynamic Canvas**: cỡ chữ tự thu nhỏ dần (tới `original_size * Font
+  Scale Factor`) cho đến khi văn bản đã dịch (word-wrap) vừa khít khung
+  gốc, đo bằng 1 `Shape` chưa commit (không để lại chữ ma). Nếu đã ở cỡ nhỏ
+  nhất mà vẫn cần thêm chỗ theo chiều dọc, khung sẽ giãn xuống dưới thay vì
+  âm thầm cắt mất chữ.
+- **Chữ tiếng Việt**: vẽ bằng font hệ thống `Arial.ttf`
+  (`/System/Library/Fonts/Supplemental/`), vì font `helv` có sẵn của
+  PyMuPDF không có dấu tiếng Việt.
 
-## Known limitations (by design, not bugs)
+## Giới hạn đã biết (cố ý, không phải bug)
 
-- The table-vs-paragraph heuristic (`is_table_block`) is a simple
-  line-count/digit-density check — good enough to route obvious tables to
-  Gemini, but it will misclassify some blocks. Swap in real table detection
-  (e.g. `pdfplumber`) if this matters for your documents.
-- API keys are stored in `UserDefaults` (not Keychain) — fine for local
-  personal use, not for a version you'd hand to other people.
-- The redaction box growing downward on overflow can occasionally overlap
-  the line below it on very dense pages — acceptable given the 95% layout
-  fidelity target, not pixel-perfect on every page.
+- Heuristic phân biệt bảng/đoạn văn (`is_table_block`) chỉ là kiểm tra đơn
+  giản theo số dòng/mật độ chữ số — đủ để định tuyến các bảng rõ ràng sang
+  Gemini, nhưng sẽ phân loại sai vài trường hợp. Thay bằng công cụ nhận
+  diện bảng thật (vd. `pdfplumber`) nếu việc này quan trọng với tài liệu
+  của bạn.
+- API key được lưu trong `UserDefaults` (không phải Keychain) — ổn cho
+  dùng cá nhân local, không phù hợp cho bản đưa cho người khác dùng.
+- Khung redaction giãn xuống dưới khi tràn chữ đôi khi có thể đè lên dòng
+  bên dưới ở trang quá dày đặc — chấp nhận được với mục tiêu giữ 95% độ
+  trung thực bố cục, không phải pixel-perfect mọi trang.
 
-## Packaging / đóng gói thành .app
+## Đóng gói thành .app
 
 ```bash
 ./scripts/package_app.sh [version]
 ```
 
-Builds a release binary, generates `AppIcon.icns` from
-`Sources/CPDFGear/Resources/AppIcon.png`, bundles `PythonEngine`'s `.py`
-files (no `.venv`, no `test_*.py`) plus a **self-contained Python 3.12
-runtime** (downloaded from
+Build bản release, tạo `AppIcon.icns` từ
+`Sources/CPDFGear/Resources/AppIcon.png`, đóng gói các file `.py` của
+`PythonEngine` (không có `.venv`, không có `test_*.py`) cùng **1 bản Python
+3.12 runtime tự chứa** (tải từ
 [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone),
-deps from `requirements.txt` pre-installed into it) into `Resources/`,
-writes `Info.plist`, ad-hoc code-signs, and zips the result to
-`dist/CPDFGear-<version>-macos.zip`. ~130MB zipped, macOS Apple Silicon only.
+đã cài sẵn deps từ `requirements.txt`) vào `Resources/`, ghi `Info.plist`,
+ký ad-hoc, rồi nén thành `dist/CPDFGear-<version>-macos.zip`. Khoảng 130MB
+sau khi nén, chỉ hỗ trợ macOS Apple Silicon.
 
 Người nhận app **không cần cài gì cả** — Python + toàn bộ thư viện
 (pymupdf/pdf2docx/python-docx/python-pptx) đã nằm sẵn trong `.app`, không
@@ -138,7 +136,7 @@ chuột phải > **Open** (hoặc `xattr -cr CPDFGear.app`) một lần duy nh�
 ## CI/CD
 
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — mọi push/PR:
-  `swift build` + `pytest PythonEngine`.
+  `swift build` + chạy self-check `PythonEngine/test_*.py`.
 - [`.github/workflows/release.yml`](.github/workflows/release.yml) — push
   tag `v*.*.*` → chạy `scripts/package_app.sh`, đính file zip vào 1 GitHub
   Release tự động.
