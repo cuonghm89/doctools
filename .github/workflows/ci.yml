@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: swift build
+        run: swift build
+
+      - name: pip install PythonEngine deps
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r PythonEngine/requirements.txt pytest
+
+      - name: pytest PythonEngine
+        run: python3 -m pytest PythonEngine -v

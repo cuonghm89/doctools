@@ -1,0 +1,28 @@
+name: Release
+
+# Push 1 tag dạng v1.2.3 lên nhánh main -> build .app (ad-hoc sign, chưa
+# notarize vì chưa có Apple Developer ID) -> đính kèm zip vào GitHub Release.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Đóng gói .app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./scripts/package_app.sh "$VERSION"
+
+      - name: Tạo GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

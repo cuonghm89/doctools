@@ -118,8 +118,14 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
 - `cancel()` — gọi `PythonProcess.cancel()`, set item hiện tại `.failed`.
 
 ### PythonProcess.swift (dùng chung bởi cả 2 runner ở trên)
+- `engineDir` (static) — đường dẫn thư mục `PythonEngine`; ưu tiên
+  `Bundle.main.resourceURL/PythonEngine` (app đã đóng gói qua
+  `scripts/package_app.sh`), fallback suy ra project root từ `#filePath`
+  lúc build (chạy dev qua `swift run`/Xcode). Không còn hardcode path theo
+  máy/tài khoản cụ thể.
 - `resolvedPythonPath` (static) — đường dẫn `.venv/bin/python3` trong
-  `PythonEngine/`.
+  `PythonEngine/` (tính từ `engineDir`) nếu tồn tại, else fallback `python3`
+  từ `PATH`.
 - `run<Config: Encodable>(scriptName:config:onEvent:onFinish:)` — ghi config
   ra file JSON tạm, spawn `Process` chạy `python3 <script> --config <file>`,
   đọc stdout từng dòng qua `parseEvent`, gọi callback `onEvent`/`onFinish`.

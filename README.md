@@ -17,7 +17,12 @@ PythonEngine/
   router.py                            DeepL/Gemini smart routing + quota tracker
   test_router.py                       Self-check (no network), run directly
   requirements.txt
-  .venv/                               Already created & populated for you
+  .venv/                               Already created & populated for you (gitignored)
+scripts/
+  package_app.sh                       Build .app bundle + zip for release
+.github/workflows/
+  ci.yml                               swift build + pytest on every push/PR
+  release.yml                          Build & publish a GitHub Release on tag push
 ```
 
 ## 1. Python engine setup
@@ -48,17 +53,15 @@ Or from the terminal:
 swift run CPDFGear
 ```
 
-## 3. Point the app at the venv's Python
+## 3. Python interpreter resolution
 
-In the app's **Cài đặt** (Settings) panel, set "Python interpreter" to the
-venv's interpreter so PyMuPDF/requests are found:
-
-```
-/Users/cuonghoang/PDF Tools/PythonEngine/.venv/bin/python3
-```
-
-(Leaving it as `python3` works only if your default `python3` on PATH
-already has `pymupdf` and `requests` installed.)
+No manual setup needed: `PythonProcess.engineDir` (in
+[`PythonProcess.swift`](Sources/CPDFGear/PythonProcess.swift)) auto-resolves
+`PythonEngine`'s location — from the app bundle's `Resources/PythonEngine`
+when running a packaged `.app` (see [Packaging](#packaging--đóng-gói-thành-app)
+below), or from the project source tree when running via `swift run`/Xcode.
+It then prefers `PythonEngine/.venv/bin/python3` if that venv exists, else
+falls back to whatever `python3` is on `PATH`.
 
 ## 4. Get API keys
 
@@ -106,3 +109,45 @@ translation; Gemini key is optional but recommended once you're near the
 - The redaction box growing downward on overflow can occasionally overlap
   the line below it on very dense pages — acceptable given the 95% layout
   fidelity target, not pixel-perfect on every page.
+
+## Packaging / đóng gói thành .app
+
+```bash
+./scripts/package_app.sh [version]
+```
+
+Builds a release binary, generates `AppIcon.icns` from
+`Sources/CPDFGear/Resources/AppIcon.png`, bundles `PythonEngine`'s `.py`
+files (no `.venv`, no `test_*.py`) into `Resources/`, writes `Info.plist`,
+ad-hoc code-signs, and zips the result to `dist/CPDFGear-<version>-macos.zip`.
+
+Người nhận app (đồng nghiệp) cần tự cài Python 3 + dependencies — app
+**không** đóng gói sẵn 1 Python runtime (không dùng PyInstaller/tương tự,
+`.venv` gốc 252MB và không portable giữa máy):
+
+```bash
+python3 -m pip install -r PythonEngine/requirements.txt
+```
+
+Vì chưa có Apple Developer ID nên app chỉ được ký **ad-hoc** (không
+notarize) — lần đầu mở trên máy khác, macOS Gatekeeper sẽ chặn; mở bằng
+chuột phải > **Open** (hoặc `xattr -cr CPDFGear.app`) một lần duy nhất.
+
+## CI/CD
+
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — mọi push/PR:
+  `swift build` + `pytest PythonEngine`.
+- [`.github/workflows/release.yml`](.github/workflows/release.yml) — push
+  tag `v*.*.*` → chạy `scripts/package_app.sh`, đính file zip vào 1 GitHub
+  Release tự động.
+
+**Luồng Dev → Prod:**
+
+```
+feature/xyz  ──PR──▶  dev  ──PR (đã test ổn)──▶  main  ──tag vX.Y.Z──▶  Release
+```
+
+- Code mới: nhánh `feature/...` từ `dev`, PR vào `dev` (CI chạy tự động).
+- Khi `dev` ổn định, PR `dev` → `main`.
+- Release cho người dùng: `git tag vX.Y.Z && git push origin vX.Y.Z` trên
+  `main` → GitHub Actions tự build + tạo Release kèm file zip cài được ngay.

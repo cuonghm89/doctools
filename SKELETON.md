@@ -28,9 +28,17 @@ PDF Tools/
     ├── router.py                          # gọi API DeepL/Gemini
     ├── paragraphs.py                      # gộp/tách khối chữ thành đoạn văn
     ├── ocr_pdf.py                         # OCR trang scan (gọi ocr_cli)
-    ├── .venv/                             # venv riêng cho PythonEngine
+    ├── .venv/                             # venv riêng cho PythonEngine (gitignored)
     └── test_*.py                          # self-check, chạy trực tiếp
+scripts/
+└── package_app.sh                         # build .app đóng gói (icon .icns, Info.plist, PythonEngine) + zip
+.github/workflows/
+├── ci.yml                                 # swift build + pytest mỗi push/PR
+└── release.yml                            # build & publish GitHub Release khi push tag v*.*.*
 ```
+
+Xem [README.md](README.md#packaging--đóng-gói-thành-app) để biết luồng đóng
+gói và CI/CD dev → prod (nhánh `dev` → `main` → tag → Release).
 
 ## Sơ đồ module (ai import ai / ai gọi ai)
 
