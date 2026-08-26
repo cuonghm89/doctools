@@ -15,10 +15,13 @@ jobs:
       - name: swift build
         run: swift build
 
+      # python3 hệ thống của runner chặn pip install trực tiếp (PEP 668,
+      # "externally-managed-environment") -> phải cài qua venv.
       - name: pip install PythonEngine deps
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r PythonEngine/requirements.txt
+          python3 -m venv PythonEngine/.venv
+          PythonEngine/.venv/bin/pip install --upgrade pip
+          PythonEngine/.venv/bin/pip install -r PythonEngine/requirements.txt
 
       - name: Chạy self-check PythonEngine (test_*.py, không dùng pytest)
         run: |
@@ -26,5 +29,5 @@ jobs:
           cd PythonEngine
           for f in test_*.py; do
             echo "== $f =="
-            python3 "$f"
+            .venv/bin/python3 "$f"
           done

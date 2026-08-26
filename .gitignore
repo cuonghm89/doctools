@@ -1,6 +1,6 @@
 .build/
 .swiftpm/
-.claude/settings.local.json
+.claude/
 dist/
 PythonEngine/.venv/
 PythonEngine/__pycache__/
