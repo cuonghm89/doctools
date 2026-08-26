@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+.claude/settings.local.json
+dist/
+PythonEngine/.venv/
+PythonEngine/__pycache__/
+__pycache__/
+*.pyc
+.DS_Store
