@@ -456,19 +456,38 @@ chỉ chú thích trong code mới dịch.
     đó vào quota RPD rồi), trước khi `raise_for_status()`.
 
 ### paragraphs.py (gộp/tách khối chữ thành đoạn văn)
-- `is_bullet_text(text)` — có phải dòng bullet/đánh số không.
+- `is_bullet_text(text)` — có phải dòng bullet/đánh số không (chỉ nhận ký
+  tự bullet THẬT trong chuỗi — xem `_marker_prefix_content_x0()` cho
+  trường hợp bullet không có ký tự thật).
 - `block_font_style(block)` — (bold, italic) từ span đầu.
 - `_avg_font_size(block)` — cỡ chữ trung bình 1 khối.
 - `block_text_color(block)` — màu span đầu, tuple int 0-255.
+- `_marker_prefix_content_x0(block)` — phát hiện bullet dạng "marker hoán
+  đổi glyph": 1 số PDF xuất từ Word/PowerPoint vẽ bullet bằng font biểu
+  tượng (Wingdings-kiểu, vd mũi tên ➡) nhưng ToUnicode/`get_text()` trả về
+  span ĐẦU là 1 dấu cách trắng (không có ký tự bullet thật) ở font KHÁC
+  hẳn nội dung theo sau — `is_bullet_text()` không nhận ra được, và x0 của
+  CẢ BLOCK bị kéo lệch về vị trí marker thay vì vị trí chữ thật, khiến MỌI
+  bullet trong 1 danh sách trông như "cùng cột" → `merge_paragraph_blocks`
+  gộp nhầm các mục danh sách RIÊNG BIỆT thành 1 (bug thật, root-cause từ
+  file PDF thật của user: các bullet "Load Testing/Stress Testing/..."
+  gộp thành 1 khối, dịch dính cục, mũi tên bullet mồ côi không có chữ).
+  Trả về x0 của span chữ thật đầu tiên (bỏ qua marker) nếu phát hiện được,
+  else `None`. Gọi bởi: `merge_paragraph_blocks()`.
 - `split_incoherent_block(block, x_tolerance=3, gap_factor=1.3)` — tách 1
   "block" PyMuPDF tự gộp nhầm nhiều dòng KHÔNG liên quan (khác cột HOẶC
   cách xa nhau theo Y) thành nhiều block con. Gọi bởi:
   `merge_paragraph_blocks()`, `pdf_convert.py::_page_lines()`.
 - `merge_paragraph_blocks(blocks, x_tolerance=3, gap_factor=1.3,
   size_tolerance=0.25)` — gộp các block cùng cột/cỡ/màu/style, cách nhau đủ
-  gần, thành 1 "group" = 1 đoạn văn/bullet. Gọi:
-  `split_incoherent_block()`. Gọi bởi: `process_pdf()`,
-  `pdf_convert.py::convert_to_pptx()`.
+  gần, thành 1 "group" = 1 đoạn văn/bullet. So cột (`same_column`) dùng
+  `anchor_x0` của group (= content x0, bỏ qua marker nếu group được mở đầu
+  bởi 1 block có marker) thay vì x0 thô — nhờ vậy dòng word-wrap tiếp theo
+  của 1 bullet-marker (căn theo lề chữ thật) vẫn gộp đúng vào nhóm đó.
+  Block có marker LUÔN mở nhóm MỚI, không bao giờ gộp vào nhóm trước (tự
+  nó là điểm bắt đầu 1 mục danh sách, bất kể x0/style/color thô trùng
+  nhóm nào). Gọi: `split_incoherent_block()`, `_marker_prefix_content_x0()`.
+  Gọi bởi: `process_pdf()`, `pdf_convert.py::convert_to_pptx()`.
 
 ### ocr_pdf.py (OCR trang scan bằng Vision framework)
 - `_default_ocr_binary()` — suy ra đường dẫn `ocr_cli`: ưu tiên

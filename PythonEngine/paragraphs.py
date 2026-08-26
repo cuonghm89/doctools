@@ -46,6 +46,33 @@ def block_text_color(block):
     return (0, 0, 0)
 
 
+def _marker_prefix_content_x0(block):
+    """1 số PDF (thường xuất từ Word/PowerPoint) vẽ bullet bằng font biểu
+    tượng (Wingdings-kiểu) NHƯNG mã hoá ToUnicode của ký tự đó lại là dấu
+    CÁCH — get_text() trả về 1 span '  ' (trắng, không có ký tự bullet
+    thật nào), nằm ở font KHÁC hẳn nội dung thật theo sau. `is_bullet_text`
+    không nhận ra được (không có ký tự bullet thật trong chuỗi), và tệ hơn:
+    x0 của CẢ BLOCK bị kéo lệch về đúng vị trí span-trắng đó thay vì vị trí
+    chữ thật — mọi bullet trong cùng 1 danh sách đều bị lệch x0 y hệt nhau
+    theo kiểu này, khiến `merge_paragraph_blocks` tưởng chúng "cùng cột"
+    và gộp nhầm các mục danh sách RIÊNG BIỆT thành 1 đoạn văn.
+
+    Nếu block bắt đầu bằng 1 span trắng như vậy, trả về x0 của span chữ
+    THẬT đầu tiên theo sau (nếu font khác span trắng) — đây mới là vị trí
+    "nội dung" đáng tin để so cột. Không phải kiểu này thì trả về None."""
+    lines = block.get("lines") or []
+    if not lines:
+        return None
+    spans = lines[0].get("spans") or []
+    if not spans or spans[0]["text"].strip():
+        return None
+    marker_font = spans[0].get("font")
+    for span in spans[1:]:
+        if span["text"].strip():
+            return span["bbox"][0] if span.get("font") != marker_font else None
+    return None
+
+
 def split_incoherent_block(block, x_tolerance=3, gap_factor=1.3):
     """PyMuPDF đôi khi tự gộp các dòng chữ RỜI RẠC, không liên quan (thường
     gặp với chữ OCR chèn vào sơ đồ: các nhãn như "Publisher"/"Broker"/
@@ -123,6 +150,15 @@ def merge_paragraph_blocks(blocks, x_tolerance=3, gap_factor=1.3, size_tolerance
     ponytail: chỉ dùng heuristic canh trái — chữ canh phải hoặc canh giữa
     sẽ không có x0 ổn định, nên các cột đó sẽ không bị gộp (vẫn giữ nguyên
     từng khối riêng lẻ, giống như trước khi có thay đổi này).
+
+    Khối bắt đầu bằng marker-trắng (`_marker_prefix_content_x0` — bullet
+    hoán đổi glyph, xem docstring hàm đó) LUÔN mở 1 nhóm MỚI, không bao
+    giờ gộp vào nhóm đang có — bản thân nó chính là điểm bắt đầu 1 mục
+    danh sách mới, dù x0/style/color RAW của nó (bị marker kéo lệch) có
+    tình cờ khớp nhóm trước hay không. Việc so cột (`same_column`) cho MỌI
+    khối khác dùng `content_x0` (bỏ qua phần marker nếu có) thay vì x0 thô
+    của block — nhờ vậy dòng word-wrap tiếp theo của bullet đó (căn theo
+    lề chữ thật, không phải theo marker) vẫn gộp đúng vào cùng nhóm.
     """
     text_blocks = [b for b in blocks if b.get("type") == 0 and b.get("lines")]
     text_blocks = [sub for b in text_blocks for sub in split_incoherent_block(b, x_tolerance)]
@@ -131,30 +167,33 @@ def merge_paragraph_blocks(blocks, x_tolerance=3, gap_factor=1.3, size_tolerance
     groups = []
     for block in text_blocks:
         bbox = block["bbox"]
+        marker_x0 = _marker_prefix_content_x0(block)
+        content_x0 = bbox[0] if marker_x0 is None else marker_x0
         size = _avg_font_size(block)
         style = block_font_style(block)
         color = block_text_color(block)
         placed = False
-        for group in groups:
-            gx0, gy0, gx1, gy1 = group["bbox"]
-            same_column = abs(bbox[0] - gx0) <= x_tolerance
-            similar_size = abs(size - group["size"]) <= group["size"] * size_tolerance
-            same_style = style == group["style"]
-            same_color = color == group["color"]
-            vertical_gap = bbox[1] - gy1
-            close_enough = 0 <= vertical_gap <= size * gap_factor
-            if same_column and similar_size and same_style and same_color and close_enough:
-                group["sub_blocks"].append(block)
-                group["bbox"] = (
-                    min(gx0, bbox[0]), min(gy0, bbox[1]),
-                    max(gx1, bbox[2]), max(gy1, bbox[3]),
-                )
-                placed = True
-                break
+        if marker_x0 is None:
+            for group in groups:
+                gx0, gy0, gx1, gy1 = group["bbox"]
+                same_column = abs(content_x0 - group["anchor_x0"]) <= x_tolerance
+                similar_size = abs(size - group["size"]) <= group["size"] * size_tolerance
+                same_style = style == group["style"]
+                same_color = color == group["color"]
+                vertical_gap = bbox[1] - gy1
+                close_enough = 0 <= vertical_gap <= size * gap_factor
+                if same_column and similar_size and same_style and same_color and close_enough:
+                    group["sub_blocks"].append(block)
+                    group["bbox"] = (
+                        min(gx0, bbox[0]), min(gy0, bbox[1]),
+                        max(gx1, bbox[2]), max(gy1, bbox[3]),
+                    )
+                    placed = True
+                    break
         if not placed:
             groups.append({
                 "sub_blocks": [block], "bbox": bbox, "size": size,
-                "style": style, "color": color,
+                "style": style, "color": color, "anchor_x0": content_x0,
             })
 
     return groups

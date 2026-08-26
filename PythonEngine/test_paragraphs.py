@@ -99,4 +99,47 @@ assert block_font_style(italic_block) == (False, True)
 plain_block = make_block(72, 100, 300, 112, "Plain text")
 assert block_font_style(plain_block) == (False, False)
 
+# --- Bullet dạng "marker hoán đổi glyph" (Wingdings vẽ ra mũi tên nhưng
+# ToUnicode/get_text() trả về dấu cách) — xem _marker_prefix_content_x0().
+# Khác 1 block-1-span như make_block(): 1 dòng bullet thật gồm nhiều span
+# (marker trắng, nhãn đậm-nghiêng, mô tả thường), font marker KHÁC font nội
+# dung thật, và x0 CỦA BLOCK bị marker kéo lệch khỏi x0 nội dung thật.
+def make_marker_bullet_block(y0, y1, label, desc, marker_x0=80.0, content_x0=90.0, x1=500.0):
+    return {
+        "type": 0,
+        "bbox": (marker_x0, y0, x1, y1),
+        "lines": [{"spans": [
+            {"text": " ", "size": 10, "flags": 0, "font": "ArialMT", "color": 0,
+             "bbox": (marker_x0, y0, marker_x0 + 3, y1)},
+            {"text": label, "size": 10, "flags": 16 | 2, "font": "ComicSansMS-BoldItalic", "color": 0,
+             "bbox": (content_x0, y0, content_x0 + 60, y1)},
+            {"text": desc, "size": 10, "flags": 0, "font": "ComicSansMS", "color": 0,
+             "bbox": (content_x0 + 60, y0, x1, y1)},
+        ]}],
+    }
+
+
+def make_wrap_continuation_block(y0, y1, text, content_x0=90.0, x1=200.0):
+    return make_block(content_x0, y0, x1, y1, text, size=10)
+
+
+# 2 bullet LIÊN TIẾP, marker cùng x0 (nên x0 THÔ của cả 2 block trùng nhau)
+# nhưng là 2 mục danh sách khác nhau -> không được gộp thành 1.
+bullets = [
+    make_marker_bullet_block(116, 130, "Load Testing:", " Examines the system under load."),
+    make_marker_bullet_block(131, 145, "Stress Testing:", " Tests the system past its limits."),
+]
+groups = merge_paragraph_blocks(bullets)
+assert len(groups) == 2, f"2 mục bullet khác nhau không được gộp, got {len(groups)} groups"
+
+# Dòng word-wrap của CHÍNH bullet đó (căn theo lề chữ thật content_x0=90,
+# không phải theo marker_x0=80) PHẢI gộp vào đúng nhóm của bullet đó.
+bullet_with_wrap = [
+    make_marker_bullet_block(116, 130, "Performance Testing:", " Measures responsiveness under"),
+    make_wrap_continuation_block(130.2, 143.9, "different workloads."),
+]
+groups = merge_paragraph_blocks(bullet_with_wrap)
+assert len(groups) == 1, f"dòng wrap của bullet phải gộp vào cùng nhóm, got {len(groups)} groups"
+assert len(groups[0]["sub_blocks"]) == 2
+
 print("All paragraph-merging self-checks passed.")
