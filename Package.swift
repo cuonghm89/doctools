@@ -7,8 +7,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CPDFGear",
-            path: "Sources/CPDFGear",
-            resources: [.copy("Resources/AppIcon.png")]
+            path: "Sources/CPDFGear"
         ),
         .executableTarget(
             name: "ocr_cli",

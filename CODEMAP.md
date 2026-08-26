@@ -10,9 +10,18 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
 
 ### CPDFGearApp.swift
 - `AppDelegate.applicationDidFinishLaunching` — ép app SPM lên foreground
-  (`NSApp.setActivationPolicy(.regular)`, `.activate()`); nạp icon từ
-  `Resources/AppIcon.png` (qua `Bundle.module`, khai báo resource trong
-  `Package.swift`) và gán `NSApp.applicationIconImage` (Dock/App Switcher).
+  (`NSApp.setActivationPolicy(.regular)`, `.activate()`). Chỉ set
+  `NSApp.applicationIconImage` runtime khi CHƯA có `CFBundleIconFile` trong
+  Info.plist (tức đang chạy dev qua `swift run`/Xcode — app đóng gói qua
+  `scripts/package_app.sh` đã tự có icon từ `AppIcon.icns`). Đọc
+  `Resources/AppIcon.png` qua đường dẫn suy từ `#filePath`, KHÔNG dùng
+  `Bundle.module`: accessor đó do SwiftPM tự sinh, tìm bundle resource ngay
+  tại `Bundle.main.bundleURL` — hợp lệ khi chạy dev (bundle nằm cạnh
+  executable trong `.build/`) nhưng crash cứng (`fatalError`) trong 1 `.app`
+  đã đóng gói, và nếu cố chép bundle đó vào thì `codesign` từ chối ký hẳn
+  (không cho phép nội dung nằm ngoài `Contents/`). Đã tái hiện + xác nhận cả
+  2 lỗi bằng crash log và `codesign` thật trước khi sửa. `Package.swift`
+  không còn khai báo `resources:` cho target này nữa.
 - `CPDFGearApp` (struct `App`) — entry point, tạo `ContentView`.
 
 ### ContentView.swift
