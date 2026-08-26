@@ -243,6 +243,51 @@ Entry point: `main()` (đọc `--config`, gọi `process_pdf()`).
   trang > 60% diện tích). Gọi bởi: `process_pdf()`.
 - `intersects_image(rect, image_rects, threshold=0.15)` — Image Collision
   Guard, có chồng lấn ảnh thật không. Gọi bởi: `process_pdf()`.
+
+**Bảng THẬT (dịch riêng theo từng Ô, tách khỏi pipeline đoạn văn thường)**
+— root cause: với bảng nhiều dòng có chiều cao khác nhau giữa các cột,
+`page.get_text("dict")` (PyMuPDF) tự đọc SAI THỨ TỰ ngay từ bước trích
+xuất thô (nhãn hàng + nội dung ô kế tiếp nằm chung 1 "block" trước khi
+code chạm vào) — không heuristic nào ở tầng đoạn văn sửa được, phải đọc
+riêng theo đúng lưới ô `page.find_tables()` phân tích được. Root-cause qua
+debug trực tiếp trên file PDF thật của user (dump block/span/font/bbox
+thật), fix 3 vòng lặp cho tới khi số liệu khớp chính xác (không chỉ nhìn
+ảnh):
+  - `find_real_tables(page)` — bảng thật qua `page.find_tables()` (đường
+    kẻ lưới thật), khác `is_table_lines()` (đoán qua mật độ chữ số, chỉ để
+    định tuyến DeepL/Gemini).
+  - `_fill_bands(page, region)` / `_band_color_at(bands, x, y)` — đọc màu
+    nền THẬT (`page.get_drawings()`, vector graphics — không phải chữ) tại
+    1 điểm; dải nhỏ nhất chứa điểm đó thắng.
+  - `_merge_wrapped_table_rows(page, table)` — find_tables() đôi khi tách 1
+    hàng LOGIC (nhãn/mô tả word-wrap dài) thành nhiều "row" riêng, làm mất
+    ngữ cảnh dịch (nửa câu dịch sai) — gộp lại dựa trên CÙNG 1 dải màu nền
+    xen kẽ thật (`_fill_bands`), KHÔNG gộp gì nếu bảng không có dải màu
+    (an toàn hơn đoán bừa). Gọi bởi: `build_table_cell_units()`.
+  - `_normalize_column_x0(merged_rows, tolerance=8)` — find_tables() có
+    thể báo CHỈ SỐ CỘT khác nhau cho CÙNG 1 cột hiển thị giữa các hàng
+    (lưới mịn hơn cho hàng vừa bị gộp ở trên) → canh theo index bị SAI
+    (đã thử, không sửa được). Canh đúng: gom CỤM theo giá trị x0 GẦN NHAU
+    trên toàn bảng (chỉ tính ô có chữ thật, bỏ ô đệm/gutter rỗng — nếu
+    không sẽ bắc cầu nhầm 2 cột khác nhau), mọi ô trong 1 cụm canh về x0
+    NHỎ NHẤT (biên ngoài thật). Gọi bởi: `_merge_wrapped_table_rows()`.
+  - `_dedup_cell_jobs(jobs)` — find_tables() đôi khi trả 2 Ô CHỒNG LẤN cho
+    cùng 1 nội dung (1 ô lớn bao 1 ô nhỏ nằm trong, cùng text) — giữ ô
+    LỚN hơn. Gọi bởi: `build_table_cell_units()`.
+  - `cell_style(page, rect)` — suy ra (cỡ chữ, màu, style) đại diện 1 Ô từ
+    chính chữ thật trong đó (dựng 1 "block" giả từ mọi dòng trong `clip`,
+    dùng lại `block_font_style()`/`block_text_color_ints()` của
+    paragraphs.py).
+  - `_block_mostly_in_region(bbox, region, threshold=0.6)` — 1 block
+    (pipeline đoạn văn thường) có nằm phần lớn trong vùng 1 bảng thật
+    không — dùng để LOẠI các block đó khỏi `merge_paragraph_blocks()`
+    (nội dung đã dịch riêng ở trên rồi).
+  - `build_table_cell_units(page, tables)` — API chính: 1 bảng thật → list
+    (rect, text) sẵn sàng dịch, đã gộp hàng word-wrap + canh x0 + khử
+    trùng lặp. Gọi: `_merge_wrapped_table_rows()`, `_normalize_column_x0()`
+    (bên trong `_merge_wrapped_table_rows`), `_dedup_cell_jobs()`. Gọi
+    bởi: `process_pdf()`.
+
 - `growth_ceiling(rect, other_bboxes, page_bottom, margin=2)` — giới hạn
   giãn khung xuống dưới khi chữ dịch dài hơn khung gốc. Gọi bởi:
   `process_pdf()`.
@@ -261,8 +306,13 @@ Entry point: `main()` (đọc `--config`, gọi `process_pdf()`).
 - `build_translation_units(groups)` — gom đơn vị dịch của cả trang thành 1
   batch. Gọi bởi: `process_pdf()`. Gọi: `group_translation_units()`.
 - `process_pdf(input_pdf, output_pdf, router, max_pages=0)` — hàm chính của
-  pipeline dịch. Gọi: `ensure_text_layer()` (ocr_pdf.py),
-  `merge_paragraph_blocks()` (paragraphs.py), `page_image_rects()`,
+  pipeline dịch. MỖI TRANG: (1) `find_real_tables()` + `build_table_cell_
+  units()` — dịch/vẽ riêng theo từng Ô bảng thật TRƯỚC, redact+
+  `apply_redactions()` riêng cho các Ô đó; (2) đọc lại `get_text("dict")`
+  (giờ đã thấy chữ Việt vừa vẽ ở bước 1), loại block nằm trong vùng bảng
+  qua `_block_mostly_in_region()` rồi mới gọi `merge_paragraph_blocks()`
+  (paragraphs.py) cho phần còn lại — 2 bước KHÔNG được đảo thứ tự. Gọi:
+  `ensure_text_layer()` (ocr_pdf.py), `page_image_rects()`,
   `build_translation_units()`, `translate_units_with_code_awareness()`
   (code_blocks.py — thay cho gọi thẳng `router.translate_batch()`, xem
   CODEMAP mục code_blocks.py), `intersects_image()`, `growth_ceiling()`,

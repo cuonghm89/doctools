@@ -140,6 +140,208 @@ def intersects_image(rect, image_rects, threshold=0.15):
     return False
 
 
+def find_real_tables(page):
+    """Bảng THẬT trên trang, nhận diện qua đường kẻ lưới thật
+    (`page.find_tables()` — PyMuPDF tự phân tích vector graphics), khác
+    hẳn `is_table_lines()` chỉ ĐOÁN qua mật độ chữ số để định tuyến DeepL/
+    Gemini. Trả về [] nếu trang không có bảng nào hoặc find_tables() lỗi
+    (best-effort, không được phép làm hỏng cả trang vì 1 bảng khó phân
+    tích)."""
+    try:
+        return list(page.find_tables().tables)
+    except Exception:
+        return []
+
+
+def _block_mostly_in_region(bbox, region, threshold=0.6):
+    rect = fitz.Rect(bbox)
+    area = rect.width * rect.height
+    if not area:
+        return False
+    inter = rect & region
+    return (inter.width * inter.height) / area >= threshold
+
+
+def _fill_bands(page, region):
+    """Mọi hình chữ nhật TÔ MÀU (vector graphics thật, không phải chữ)
+    nằm trong `region` — dùng để dò dải màu nền xen kẽ theo hàng của 1
+    bảng. Trả về list (rect, fill_color_làm_tròn)."""
+    bands = []
+    for d in page.get_drawings():
+        fill = d.get("fill")
+        r = d.get("rect")
+        if fill is None or r is None:
+            continue
+        r = fitz.Rect(r)
+        if (r & region).is_empty:
+            continue
+        bands.append((r, tuple(round(c, 3) for c in fill)))
+    return bands
+
+
+def _band_color_at(bands, x, y):
+    """Màu (đã làm tròn) của dải nền NHỎ NHẤT chứa điểm (x, y), None nếu
+    không khớp dải nào. Ưu tiên dải nhỏ nhất để tránh khớp nhầm 1 rect nền
+    to bao trùm cả bảng thay vì đúng dải của riêng hàng đó."""
+    best = None
+    for r, color in bands:
+        if r.x0 <= x <= r.x1 and r.y0 <= y <= r.y1:
+            area = r.width * r.height
+            if best is None or area < best[0]:
+                best = (area, color)
+    return best[1] if best else None
+
+
+def _merge_wrapped_table_rows(page, table):
+    """find_tables() đôi khi tách 1 hàng LOGIC (nhãn/mô tả word-wrap dài,
+    vd "DCS (Data Security & Information Lifecycle Management)") thành
+    NHIỀU đối tượng "row" RIÊNG BIỆT — gặp thực tế trên file PDF thật của
+    user. Hậu quả: (1) dịch mất ngữ cảnh (nửa câu "chains." dịch riêng ra
+    "Xiềng xích." thay vì đúng nghĩa "chuỗi cung ứng"), (2) x0 giữa các
+    "row" bị tách lệch nhau vài pixel (find_tables() báo cột hơi khác cho
+    "row" bị tách so với row bình thường) → thụt lề không đều khi vẽ lại.
+
+    Nhiều bảng dùng dải MÀU NỀN xen kẽ theo hàng LOGIC thật (không theo
+    cách find_tables() tách "row") — đây là tín hiệu đáng tin lấy trực
+    tiếp từ vector graphics thật (`page.get_drawings()`, KHÁC get_text(),
+    không thể bị đánh lừa bởi cách đọc chữ sai thứ tự): 2 "row" liền kề
+    thuộc CÙNG 1 dải màu nền chắc chắn là CÙNG 1 hàng thật, gộp lại theo
+    từng cột (nối text bằng dấu cách, hợp bbox). Bảng không có dải màu
+    xen kẽ (get_drawings() không khớp gì) thì KHÔNG gộp gì cả — an toàn
+    hơn là đoán bừa.
+
+    Trả về list các "row" đã gộp, cùng shape (row.cells, row_text) như
+    input để build_table_cell_units() dùng lại y nguyên logic bên dưới."""
+    bands = _fill_bands(page, fitz.Rect(table.bbox))
+    merged = []  # list of {"cells": [...], "texts": [...], "color": ...}
+    for row, row_text in zip(table.rows, table.extract()):
+        probe = next((fitz.Rect(c) for c in row.cells if c), None)
+        color = _band_color_at(bands, probe.x0 + 2, (probe.y0 + probe.y1) / 2) if probe else None
+
+        if merged and color is not None and merged[-1]["color"] == color:
+            target = merged[-1]
+            for i, (cell_bbox, text) in enumerate(zip(row.cells, row_text)):
+                if cell_bbox is None:
+                    continue
+                rect = fitz.Rect(cell_bbox)
+                text = (text or "").strip()
+                if target["cells"][i] is None:
+                    target["cells"][i] = rect
+                    target["texts"][i] = text
+                else:
+                    target["cells"][i] = target["cells"][i] | rect
+                    if text:
+                        target["texts"][i] = (target["texts"][i] + " " + text).strip()
+        else:
+            cells = [fitz.Rect(c) if c else None for c in row.cells]
+            texts = [(t or "").strip() if c else None for c, t in zip(row.cells, row_text)]
+            merged.append({"cells": cells, "texts": texts, "color": color})
+
+    return _normalize_column_x0([(m["cells"], m["texts"]) for m in merged])
+
+
+def _normalize_column_x0(merged_rows, tolerance=8):
+    """find_tables() đôi khi báo x0 khác nhau cho CÙNG 1 cột hiển thị giữa
+    các hàng — không thể canh theo CHỈ SỐ cột (`cells[i]`): độ mịn lưới nó
+    tự dò được đổi theo từng hàng, nên "Miền" rơi vào index 0 ở hàng bình
+    thường nhưng lại rơi vào index 1 ở hàng vừa bị `_merge_wrapped_table_
+    rows()` gộp lại (gặp thực tế trên file PDF thật của user: nhãn "DCS"
+    lệch ~5.4pt so với "AAC" dù cùng 1 cột, đã thử canh theo index vẫn
+    không sửa được vì 2 nhãn đó ở 2 index KHÁC NHAU).
+
+    Thay vào đó gom CỤM theo giá trị x0 thật gần nhau (trong `tolerance`)
+    trên TOÀN BẢNG — chỉ tính từ ô có chữ thật (bỏ ô gutter/đệm rỗng giữa
+    các cột, nếu không sẽ bắc cầu nhầm 2 cột hiển thị khác nhau qua chuỗi
+    ô đệm liền kề). Mọi ô trong 1 cụm canh về x0 NHỎ NHẤT của cụm (biên
+    ngoài thật — ô hẹp hơn chỉ có thể là tập con nằm bên trong)."""
+    all_x0 = sorted({
+        rect.x0 for cells, texts in merged_rows
+        for rect, text in zip(cells, texts)
+        if rect is not None and text
+    })
+    clusters = []
+    for x0 in all_x0:
+        if clusters and x0 - clusters[-1][-1] <= tolerance:
+            clusters[-1].append(x0)
+        else:
+            clusters.append([x0])
+    canonical_x0 = {x0: min(cluster) for cluster in clusters for x0 in cluster}
+
+    for cells, texts in merged_rows:
+        for i, (rect, text) in enumerate(zip(cells, texts)):
+            if rect is not None and text and rect.x0 in canonical_x0:
+                cells[i] = fitz.Rect(canonical_x0[rect.x0], rect.y0, rect.x1, rect.y1)
+    return merged_rows
+
+
+def build_table_cell_units(page, tables):
+    """1 bảng THẬT (find_real_tables()) → list (rect, text) cho từng Ô có
+    chữ, bỏ qua ô bị ô khác merge chiếm (`cells[i] is None`) và ô rỗng.
+    Gộp trước các "row" bị find_tables() tách nhầm do word-wrap (xem
+    _merge_wrapped_table_rows()).
+
+    Lý do tách riêng khỏi pipeline đoạn văn thường (group_translation_
+    units/merge_paragraph_blocks): với bảng nhiều dòng có CHIỀU CAO KHÁC
+    NHAU giữa các cột, chính `page.get_text("dict")` (PyMuPDF) đã đọc SAI
+    THỨ TỰ đọc ngay từ bước trích xuất thô — nhãn hàng và nội dung ô kế
+    tiếp bị nằm chung 1 "block" TRƯỚC KHI code của app chạm vào, khác hẳn
+    lỗi bullet-marker (do chính merge_paragraph_blocks() tự gộp nhầm — xem
+    paragraphs.py). Không heuristic nào sửa được thứ tự đã sai từ nguồn;
+    phải đọc riêng theo đúng lưới ô mà find_tables() đã phân tích được."""
+    jobs = []
+    for table in tables:
+        for cells, texts in _merge_wrapped_table_rows(page, table):
+            for cell_bbox, text in zip(cells, texts):
+                if cell_bbox is None or not text:
+                    continue
+                jobs.append((cell_bbox, text))
+    return _dedup_cell_jobs(jobs)
+
+
+def _dedup_cell_jobs(jobs):
+    """find_tables() đôi khi trả về 2 Ô CHỒNG LẤN cho cùng 1 nội dung — 1 ô
+    lớn bao trọn 1 ô nhỏ hơn nằm ngay bên trong, cùng hệt 1 chuỗi text.
+    Gặp thực tế trên file PDF thật của user (dòng nhãn đầu tiên của 1 bảng
+    bị nhân đôi, dịch/vẽ 2 lần đè lên nhau). Giữ lại ô LỚN HƠN (khớp khung
+    hiển thị thật hơn), bỏ ô nhỏ trùng lặp."""
+    keep = []
+    for rect, text in jobs:
+        area = rect.width * rect.height
+        dropped = False
+        for i, (kept_rect, kept_text) in enumerate(keep):
+            if text != kept_text:
+                continue
+            kept_area = kept_rect.width * kept_rect.height
+            inter = rect & kept_rect
+            inter_area = inter.width * inter.height
+            if area and kept_area and inter_area / min(area, kept_area) > 0.8:
+                if area > kept_area:
+                    keep[i] = (rect, text)
+                dropped = True
+                break
+        if not dropped:
+            keep.append((rect, text))
+    return keep
+
+
+def cell_style(page, rect):
+    """Suy ra (cỡ chữ, màu, style) đại diện cho 1 Ô bảng từ chính chữ thật
+    nằm trong đó. find_tables()/extract() chỉ cho text phẳng, không có
+    sẵn 1 PyMuPDF 'block' cho từng ô — tự dựng 1 'block' giả từ mọi dòng
+    nằm trong `clip` rồi dùng lại đúng các hàm suy luận style/color đã có
+    cho block thật (paragraphs.py), tránh viết trùng logic."""
+    lines = [
+        line for b in page.get_text("dict", clip=rect)["blocks"]
+        if "lines" in b for line in b["lines"]
+    ]
+    if not lines:
+        return 9.0, (0, 0, 0), (False, False)
+    fake_block = {"lines": lines}
+    sizes = [span["size"] for line in lines for span in line["spans"]]
+    avg_size = sum(sizes) / len(sizes) if sizes else 9.0
+    return avg_size, block_text_color_ints(fake_block), block_font_style(fake_block)
+
+
 def growth_ceiling(rect, other_bboxes, page_bottom, margin=2):
     """1 khung được phép giãn xuống dưới tối đa bao nhiêu mà không đè lên
     thứ nằm bên dưới nó. Xét mọi khung khác giao nhau theo chiều ngang với
@@ -279,7 +481,47 @@ def process_pdf(input_pdf, output_pdf, router, max_pages=0):
     for page_index, page in enumerate(doc):
         if page_index >= total:
             break
+
+        # Bảng THẬT (đường kẻ lưới thật, không phải đoán): dịch/vẽ riêng
+        # theo từng Ô TRƯỚC khi đọc block cho pipeline đoạn văn thường bên
+        # dưới — xem docstring build_table_cell_units() lý do phải tách
+        # riêng. Redact+vẽ xong thì đọc lại get_text("dict") sẽ thấy đúng
+        # chữ Việt vừa vẽ (không phải chữ Anh gốc) trong vùng bảng.
+        real_tables = find_real_tables(page)
+        table_regions = [fitz.Rect(t.bbox) for t in real_tables]
+        cell_jobs = build_table_cell_units(page, real_tables)
+        if cell_jobs:
+            cell_units = [(text, True) for _rect, text in cell_jobs]
+            cell_results = translate_units_with_code_awareness(cell_units, router)
+            cell_pending = []
+            for (rect, orig_text), result in zip(cell_jobs, cell_results):
+                translated, engine, deepl_error, item_error = result
+                if item_error is not None or not translated.strip():
+                    continue
+                if orig_text.isupper():
+                    translated = translated.upper()
+                size, color, style = cell_style(page, rect)
+                bg_color = local_bg_color(page, rect)
+                page.add_redact_annot(rect, fill=bg_color)
+                cell_pending.append((rect, translated, size, color, style))
+                emit(type="progress", page=page_index + 1, total=total, engine=engine, detail=deepl_error)
+            if cell_pending:
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+                for rect, translated, size, color, style in cell_pending:
+                    # max_y1=rect.y1: không cho giãn khung qua khỏi chính ô
+                    # đó — giãn xuống sẽ đè lên hàng dưới, khác đoạn văn
+                    # thường có chỗ trống để giãn.
+                    fit_and_draw(page, rect, translated, size, color=color, style=style, max_y1=rect.y1)
+
         blocks = page.get_text("dict")["blocks"]
+        if table_regions:
+            # Bỏ block nằm trong vùng bảng khỏi pipeline đoạn văn thường —
+            # nội dung đó đã dịch/vẽ ở trên rồi (hoặc cố ý bỏ qua nếu lỗi),
+            # không được để merge_paragraph_blocks() động vào lần nữa.
+            blocks = [
+                b for b in blocks
+                if not any(_block_mostly_in_region(b["bbox"], r) for r in table_regions)
+            ]
         groups = merge_paragraph_blocks(blocks)
         all_bboxes = [g["bbox"] for g in groups]
         image_rects = page_image_rects(page)

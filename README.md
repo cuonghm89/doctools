@@ -108,6 +108,16 @@ của DeepL.
 - **Kiểm tra key** (`ApiKeyValidator.swift`): nút "Kiểm tra key" cạnh mỗi ô
   DeepL/Gemini gọi thử 1 endpoint nhẹ (không tốn quota dịch thật) để báo
   ngay key còn dùng được hay không, thay vì phải chờ dịch xong mới biết.
+- **Bảng THẬT dịch theo từng Ô** (`find_real_tables()`/`build_table_cell_units()`
+  trong `translator_engine.py`): bảng có đường kẻ lưới thật (phát hiện qua
+  `page.find_tables()`) được dịch/vẽ riêng theo từng ô, tách khỏi pipeline
+  đoạn văn thường — `page.get_text("dict")` tự đọc SAI THỨ TỰ cho bảng
+  nhiều dòng-cao-khác-nhau (nhãn hàng lẫn vào nội dung ô kế tiếp) trước cả
+  khi code chạm vào, không heuristic đoạn văn nào sửa được. Hàng bị tách
+  do word-wrap được gộp lại dựa trên dải màu nền xen kẽ thật (vector
+  graphics), và mọi ô trong cùng 1 cột được canh về đúng 1 mốc x0 (gom
+  cụm theo khoảng cách, không theo chỉ số cột — `find_tables()` có thể
+  báo chỉ số cột khác nhau cho cùng 1 cột hiển thị).
 
 ## Giới hạn đã biết (cố ý, không phải bug)
 
@@ -120,6 +130,10 @@ của DeepL.
   thật cho từng ngôn ngữ: comment nằm trong 1 chuỗi ký tự dài/nhiều dòng có
   thể bị tách nhầm, và comment khối nhiều dòng (`/* ... */` tràn dòng,
   `<!-- -->`) không được xử lý — dòng đó giữ nguyên, không dịch.
+- Bảng vẽ dưới dạng ẢNH (screenshot dán vào tài liệu, không phải chữ thật)
+  không dịch được — `get_text()` không đọc được gì trong 1 vùng ảnh. Chỉ
+  trang SCAN TOÀN BỘ (không có chữ thật ở bất kỳ đâu) mới được tự OCR; 1
+  bảng-ảnh nằm giữa các đoạn chữ thật khác trên cùng trang thì không.
 - API key được lưu trong **Keychain** (`KeychainStore.swift`, không còn
   `UserDefaults`/plain text). Vì app chỉ ký ad-hoc (chưa có Apple Developer
   ID), chữ ký đổi mỗi lần đóng gói lại → macOS coi mỗi bản release là "app

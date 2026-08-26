@@ -102,7 +102,11 @@ graph LR
   `processNext()` → `PythonProcess.run()` (subprocess) →
   `translator_engine.py --config` → `main()` → tự nhận diện định dạng theo
   đuôi file: `.pdf` → `process_pdf()` (xóa/vẽ lại từng khối chữ bằng
-  redaction); `.docx`/`.pptx` → `translate_docx()`/`translate_pptx()`
+  redaction — bảng THẬT phát hiện qua `find_tables()` được dịch/vẽ riêng
+  theo từng Ô TRƯỚC, tách khỏi pipeline đoạn văn thường bên dưới, vì
+  `get_text("dict")` tự đọc sai thứ tự cho bảng nhiều dòng-cao-khác-nhau —
+  xem CODEMAP.md mục `build_table_cell_units()`); `.docx`/`.pptx` →
+  `translate_docx()`/`translate_pptx()`
   (`office_translate.py` — thay trực tiếp text trong run có sẵn, giữ
   nguyên mọi định dạng khác vì không đụng XML nào khác). Cả 2 nhánh gọi
   `translate_units_with_code_awareness()` (`code_blocks.py`) thay vì gọi
