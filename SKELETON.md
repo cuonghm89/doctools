@@ -19,6 +19,7 @@ PDF Tools/
 │   │   ├── HistoryStore.swift             #   lịch sử file đã dịch/xuất (UserDefaults JSON)
 │   │   ├── QuotaTracker.swift             #   đọc lại quota DeepL đã dùng (usage_tracker.json)
 │   │   ├── KeychainStore.swift            #   lưu/đọc API key qua Keychain macOS
+│   │   ├── ApiKeyValidator.swift          #   nút "Kiểm tra key" — gọi thử DeepL/Gemini
 │   │   └── UpdateChecker.swift            #   hỏi GitHub Releases xem có bản mới không
 │   └── ocr_cli/
 │       └── main.swift                     # binary OCR riêng (Vision framework)

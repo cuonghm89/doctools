@@ -40,6 +40,11 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
   cách nạp trên background thread (`Task.detached`) rồi gán lại `@State`
   qua `MainActor.run`. `isLoadingApiKeys` chặn `.onChange` tự ghi ngược lại
   Keychain giá trị vừa đọc xong.
+- `keyTestRow(isChecking:result:onTest:)` — nút "Kiểm tra key" + hiện kết
+  quả (`ApiKeyValidator.Outcome`, xem `ApiKeyValidator.swift`). `testKey(_:
+  isChecking:result:validate:)` — chạy `validate` (async) trên background,
+  dùng chung cho cả DeepL (`ApiKeyValidator.validateDeepL`) và Gemini
+  (`.validateGemini`) qua tham số truyền vào. Gọi bởi: `settingsCard`.
 - `canStart` — chặn khi `queue` rỗng/thiếu DeepL key/runner/converter đang
   chạy. `canConvert` — chặn khi `pdfsInQueue` rỗng (xuất Word/PPTX chỉ nhận
   input PDF) hoặc runner/converter đang chạy.
@@ -87,6 +92,15 @@ luồng chạy chính). Cập nhật file này khi thêm/sửa hàm quan trọng
 - Gọi `runner.start(inputURLs: queue, ...)` khi bấm nút dịch (mọi định
   dạng trong hàng đợi); `converter.start(inputURLs: pdfsInQueue, ...)` khi
   bấm Xuất Word/PowerPoint (chỉ file PDF).
+
+### ApiKeyValidator.swift
+- `validateDeepL(_:)` — gọi `GET /v2/usage` (endpoint free/pro theo hậu tố
+  `:fx`, giống `router.py::refresh_usage()`) — không tốn quota dịch thật.
+- `validateGemini(_:)` — gọi `GET /v1beta/models?key=...` (liệt kê model,
+  KHÔNG gọi `generateContent` — tránh tốn quota RPD chỉ để test key).
+- `perform(_:)` (private) — dùng chung cho cả 2: map status code HTTP →
+  `Outcome` (`.valid` nếu 200; 401/403 → "key sai/thu hồi"; 400 → "key
+  không hợp lệ"; khác → hiện thẳng mã lỗi). Gọi bởi: `ContentView.testKey()`.
 
 ### KeychainStore.swift
 - `service` = `"dev.cuonghoang.cpdfgear"` (cố định, độc lập với Bundle ID

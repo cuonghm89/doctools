@@ -105,6 +105,9 @@ của DeepL.
 - **Kiểm tra bản mới** (`UpdateChecker.swift`): mỗi lần mở app đã đóng gói,
   tự hỏi GitHub Releases xem có bản mới hơn không (chỉ báo, không tự tải/
   cài) — hiện 1 banner nhỏ với nút "Tải về" nếu có.
+- **Kiểm tra key** (`ApiKeyValidator.swift`): nút "Kiểm tra key" cạnh mỗi ô
+  DeepL/Gemini gọi thử 1 endpoint nhẹ (không tốn quota dịch thật) để báo
+  ngay key còn dùng được hay không, thay vì phải chờ dịch xong mới biết.
 
 ## Giới hạn đã biết (cố ý, không phải bug)
 
@@ -139,9 +142,14 @@ Build bản release, tạo `AppIcon.icns` từ
 `PythonEngine` (không có `.venv`, không có `test_*.py`) cùng **1 bản Python
 3.12 runtime tự chứa** (tải từ
 [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone),
-đã cài sẵn deps từ `requirements.txt`) vào `Resources/`, ghi `Info.plist`,
-ký ad-hoc, rồi nén thành `dist/CPDFGear-<version>-macos.zip`. Khoảng 130MB
-sau khi nén, chỉ hỗ trợ macOS Apple Silicon.
+đã cài sẵn deps từ `requirements.txt`, đã strip debug symbols + ký lại
+từng `.so`/`.dylib` để giảm dung lượng) vào `Resources/`, ghi `Info.plist`,
+ký ad-hoc, rồi nén thành `dist/CPDFGear-<version>-macos.zip`. Khoảng 110MB
+sau khi nén (phần lớn do `opencv-python-headless` mà `pdf2docx` phụ thuộc —
+không gỡ được vì `cv2` hard-link trực tiếp tới các thư viện codec đó, gỡ ra
+là `import cv2` lỗi thiếu dylib ngay), chỉ hỗ trợ macOS Apple Silicon (chưa
+có universal binary — cần Xcode.app thật, máy build hiện chỉ có Command
+Line Tools).
 
 Người nhận app **không cần cài gì cả** — Python + toàn bộ thư viện
 (pymupdf/pdf2docx/python-docx/python-pptx) đã nằm sẵn trong `.app`, không

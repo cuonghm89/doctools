@@ -76,6 +76,24 @@ rm -rf "$RUNTIME_DIR/lib/python$PYTHON_MM/site-packages/pip" \
     "$RUNTIME_DIR"/lib/python"$PYTHON_MM"/site-packages/pip-*.dist-info \
     "$RUNTIME_DIR/bin/pip" "$RUNTIME_DIR/bin/pip3" "$RUNTIME_DIR/bin/pip$PYTHON_MM"
 find "$RUNTIME_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+# Bộ test riêng của các thư viện (numpy/..., không phải code chạy thật) —
+# an toàn để bỏ, không đụng gì tới runtime.
+find "$RUNTIME_DIR/lib/python$PYTHON_MM/site-packages" -type d \( -name "tests" -o -name "test" \) \
+    -exec rm -rf {} + 2>/dev/null || true
+
+echo "==> Strip debug symbols khỏi thư viện native (.so/.dylib) + ký lại"
+# ponytail: strip -x an toàn (chỉ bỏ symbol table, không đụng code chạy) —
+# ĐÃ verify: import cv2 + chạy findContours() thật vẫn đúng sau strip. Trên
+# Apple Silicon, strip làm MẤT chữ ký code hiện có (SIGKILL khi import nếu
+# không ký lại) — và `codesign --deep` ở app level KHÔNG đáng tin cho việc
+# này (theo đúng cảnh báo chính thức của Apple: --deep không đảm bảo tìm
+# hết mọi Mach-O nằm rời rạc trong Resources/, đã tái hiện thực tế: sau
+# --deep, deep-verify vẫn PASS nhưng `import cv2` vẫn SIGKILL) — phải tự ký
+# ad-hoc từng file NGAY sau strip, không dựa vào bước ký ở cuối.
+while IFS= read -r -d '' lib; do
+    strip -x "$lib" 2>/dev/null || true
+    codesign --force --sign - "$lib" 2>/dev/null || true
+done < <(find "$RUNTIME_DIR" \( -name "*.so" -o -name "*.dylib" \) -print0)
 
 echo "==> Info.plist"
 cat > "$CONTENTS/Info.plist" <<PLIST

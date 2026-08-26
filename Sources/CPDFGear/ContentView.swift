@@ -16,6 +16,11 @@ struct ContentView: View {
     @State private var isLoadingApiKeys = true
     @AppStorage("maxPages") private var maxPages: Int = 0
 
+    @State private var deeplCheckResult: ApiKeyValidator.Outcome?
+    @State private var geminiCheckResult: ApiKeyValidator.Outcome?
+    @State private var isCheckingDeepL = false
+    @State private var isCheckingGemini = false
+
     @State private var queue: [URL] = []
     @State private var isSettingsExpanded = true
     @State private var isHistoryExpanded = false
@@ -306,7 +311,16 @@ struct ContentView: View {
         DisclosureGroup(isExpanded: $isSettingsExpanded) {
             VStack(spacing: 12) {
                 settingsField(icon: "key.fill", placeholder: "DeepL API Key", text: $deeplApiKey, secure: true)
+                keyTestRow(isChecking: isCheckingDeepL, result: deeplCheckResult) {
+                    testKey(deeplApiKey, isChecking: $isCheckingDeepL, result: $deeplCheckResult,
+                            validate: ApiKeyValidator.validateDeepL)
+                }
+
                 settingsField(icon: "sparkles", placeholder: "Gemini API Key (fallback)", text: $geminiApiKey, secure: true)
+                keyTestRow(isChecking: isCheckingGemini, result: geminiCheckResult) {
+                    testKey(geminiApiKey, isChecking: $isCheckingGemini, result: $geminiCheckResult,
+                            validate: ApiKeyValidator.validateGemini)
+                }
 
                 HStack {
                     Image(systemName: "doc.on.doc")
@@ -382,6 +396,57 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
         .textFieldStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func keyTestRow(isChecking: Bool, result: ApiKeyValidator.Outcome?, onTest: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Button(action: onTest) {
+                if isChecking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Kiểm tra key")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(isChecking)
+
+            switch result {
+            case .valid:
+                Label("Hợp lệ", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            case .invalid(let message):
+                Label(message, systemImage: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            case nil:
+                EmptyView()
+            }
+            Spacer()
+        }
+    }
+
+    /// Chạy `validate(key)` trên background, cập nhật `isChecking`/`result`
+    /// trên main. Dùng chung cho cả DeepL/Gemini qua tham số `validate`.
+    private func testKey(
+        _ key: String,
+        isChecking: Binding<Bool>,
+        result: Binding<ApiKeyValidator.Outcome?>,
+        validate: @escaping (String) async -> ApiKeyValidator.Outcome
+    ) {
+        guard !key.isEmpty else {
+            result.wrappedValue = .invalid("Chưa nhập key")
+            return
+        }
+        isChecking.wrappedValue = true
+        result.wrappedValue = nil
+        Task {
+            let outcome = await validate(key)
+            isChecking.wrappedValue = false
+            result.wrappedValue = outcome
+        }
     }
 
     // MARK: - Trạng thái
