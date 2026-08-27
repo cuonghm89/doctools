@@ -1,7 +1,10 @@
 """Self-check các hàm canh-giữa-theo-chiều-dọc trong image_table_translate.py
 — chạy trực tiếp: python3 test_image_table_translate.py"""
 import fitz
-from image_table_translate import _drop_nested_regions, _estimate_line_count, _vcentered_rect
+from image_table_translate import (
+    _detect_grid_lines, _drop_nested_regions, _estimate_line_count,
+    _header_ink_color, _vcentered_rect,
+)
 
 
 # --- _drop_nested_regions: case THẬT gặp trên bảng STRIDE của user —
@@ -49,3 +52,43 @@ almost_full = _vcentered_rect(full_rect, long_text, 10)
 assert almost_full.y0 - full_rect.y0 < full_rect.height, "không được đẩy quá đà ra ngoài chiều cao ô"
 
 print("Tất cả self-check canh-giữa-theo-chiều-dọc đều pass.")
+
+
+# --- _detect_grid_lines: dò đúng viền vẽ thật (case bảng SOC-1/SOC-2 của
+# user — có viền đen liền mạch) bằng cách dựng 1 trang PDF thật có vẽ lưới
+# 2x2 rồi render pixmap, không cần ảnh chụp thật. ---
+grid_doc = fitz.open()
+grid_page = grid_doc.new_page(width=300, height=200)
+grid_region = fitz.Rect(20, 20, 280, 180)
+grid_page.draw_rect(grid_region, color=(0, 0, 0), width=2)
+grid_page.draw_line(fitz.Point(grid_region.x0, 100), fitz.Point(grid_region.x1, 100), color=(0, 0, 0), width=2)
+grid_page.draw_line(fitz.Point(150, grid_region.y0), fitz.Point(150, grid_region.y1), color=(0, 0, 0), width=2)
+result = _detect_grid_lines(grid_page, grid_region)
+assert result is not None, "phải dò được lưới 2x2 có viền vẽ rõ ràng"
+row_bounds, col_bounds, border_color = result
+assert len(row_bounds) == 3, f"lưới 2 hàng -> 3 đường kẻ ngang (trên/giữa/dưới), got {len(row_bounds)}"
+assert len(col_bounds) == 3, f"lưới 2 cột -> 3 đường kẻ dọc (trái/giữa/phải), got {len(col_bounds)}"
+assert max(border_color) < 60, f"viền vẽ đen phải dò ra màu gần đen, got {border_color}"
+
+# Trang KHÔNG có đường kẻ nào (case STRIDE của user — chỉ màu nền, không
+# viền) -> None, để _ocr_table_grid() rơi về fallback theo vị trí chữ.
+blank_doc = fitz.open()
+blank_page = blank_doc.new_page(width=300, height=200)
+assert _detect_grid_lines(blank_page, grid_region) is None, "trang trắng không viền không được báo động giả"
+
+print("Tất cả self-check dò-đường-kẻ-lưới đều pass.")
+
+
+# --- _header_ink_color: case THẬT gặp trên bảng SOC-1/SOC-2 của user —
+# chữ tiêu đề trắng NHỎ/MẢNH trên nền xanh đậm, pixel trắng tinh chỉ chiếm
+# < 1% vùng lấy mẫu (phần lớn là pixel rìa khử răng cưa pha trộn với nền)
+# -> _detect_ink_color() cũ (trung bình cả cụm) ra xanh nhạt sai hẳn. ---
+ink_doc = fitz.open()
+ink_page = ink_doc.new_page(width=200, height=100)
+BLUE_BG = (0.1, 0.6, 0.85)
+ink_page.draw_rect(fitz.Rect(0, 0, 200, 100), fill=BLUE_BG, color=None)
+ink_page.insert_textbox(fitz.Rect(20, 30, 180, 70), "SOC-1", fontsize=8, color=(1, 1, 1), fontname="helv")
+ink = _header_ink_color(ink_page, fitz.Rect(20, 30, 180, 70), BLUE_BG)
+assert all(c > 200 for c in ink), f"chữ trắng mảnh trên nền xanh phải dò ra gần trắng, got {ink}"
+
+print("Tất cả self-check dò-màu-chữ-tiêu-đề đều pass.")

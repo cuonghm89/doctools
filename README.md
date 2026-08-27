@@ -121,15 +121,18 @@ của DeepL.
 - **Bảng-ẢNH dịch qua OCR** (`image_table_translate.py::
   translate_image_tables()`): bảng vẽ dưới dạng ảnh (screenshot dán vào
   tài liệu, không phải chữ thật) được OCR bằng Vision (`ocr_cli`), dựng
-  lại lưới hàng/cột từ VỊ TRÍ chữ OCR (không dò đường kẻ pixel — nhiều
-  ảnh loại này không có viền vẽ thật), dịch từng ô rồi xoá ảnh gốc vẽ lại
-  bằng vector thật: nền lấy mẫu từ ảnh gốc, hàng tiêu đề in đậm + màu chữ
-  lấy mẫu riêng, phần thân dùng 1 màu chữ đồng nhất (mặc định đen, khớp
-  quy ước phổ biến của tài liệu thay vì lấy mẫu từng ô dễ bị nhiễu), mọi ô
-  canh giữa theo chiều dọc. Ảnh nào bị nhiều lớp ảnh chồng lồng nhau (kiểu
-  ghép khung viền + nội dung khi export từ PowerPoint/Word) chỉ xử lý 1
-  lần trên lớp lớn nhất, tránh dịch chồng 2 lần. Ảnh không đủ tin cậy là
-  bảng (ít chữ, không thấy lưới rõ) giữ nguyên không đụng tới.
+  lại lưới hàng/cột theo 2 đường tuỳ ảnh — ảnh CÓ viền vẽ thật (vd. bảng
+  SOC-1/SOC-2) dò trực tiếp bằng pixel, chính xác nhất; ảnh KHÔNG có viền
+  (vd. bảng STRIDE, chỉ màu nền xen kẽ) suy đoán từ VỊ TRÍ chữ OCR — rồi
+  dịch từng ô, xoá ảnh gốc vẽ lại bằng vector thật: nền lấy mẫu từ ảnh
+  gốc, VIỀN LƯỚI vẽ lại đúng màu gốc nếu ảnh có viền thật, hàng tiêu đề in
+  đậm + màu chữ lấy mẫu riêng, phần thân dùng 1 màu chữ đồng nhất (mặc
+  định đen, khớp quy ước phổ biến của tài liệu thay vì lấy mẫu từng ô dễ
+  bị nhiễu), mọi ô canh giữa theo chiều dọc. Ảnh nào bị nhiều lớp ảnh
+  chồng lồng nhau (kiểu ghép khung viền + nội dung khi export từ
+  PowerPoint/Word) chỉ xử lý 1 lần trên lớp lớn nhất, tránh dịch chồng 2
+  lần. Ảnh không đủ tin cậy là bảng (ít chữ, không thấy lưới rõ) giữ
+  nguyên không đụng tới.
 
 ## Giới hạn đã biết (cố ý, không phải bug)
 

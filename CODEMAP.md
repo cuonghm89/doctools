@@ -338,31 +338,57 @@ Gọi bởi: `translator_engine.py::process_pdf()` (import cục bộ, tránh v�
 lặp — module này cũng import cục bộ `fit_and_draw`/`local_bg_color`/
 `SCALE_FACTOR` ngược lại từ `translator_engine.py` bên trong hàm cần dùng).
 
-Thuật toán dựng lưới hàng/cột: OCR bằng Vision (`ocr_cli`, qua `ocr_pdf.py`)
-2 lượt — lượt 1 tìm ranh giới CỘT từ khoảng trắng thật giữa các dòng "hẹp"
-(dòng rộng bất thường bị nghi Vision gộp nhầm 2 cột liền kề); lượt 2 OCR
-LẠI riêng từng dải cột theo ranh giới đó (tránh gộp cột). Hàng: mỗi cột tự
-gom hàng riêng, lấy cột đếm được NHIỀU hàng nhất làm tham chiếu, mọi dòng
-OCR gán lại theo TÂM gần nhất với hàng tham chiếu — đã kiểm chứng khớp
-100% trên bảng STRIDE thật của user. Xem docstring `_ocr_table_grid()` để
-biết đầy đủ lý do từng bước (đã thử — thất bại — sửa qua 3 vòng lặp).
+Thuật toán dựng lưới hàng/cột theo 2 đường, tuỳ ảnh có viền vẽ thật hay
+không (`_ocr_table_grid()` thử đường (1) trước, rơi về đường (2) nếu
+không dò được viền):
+1. **Có viền vẽ thật** (vd. bảng SOC-1/SOC-2 của user — viền đen liền
+   mạch quanh mọi ô): dò trực tiếp bằng PIXEL (`_detect_grid_lines()` —
+   `page.get_drawings()` không đọc được đường kẻ vẽ SẴN bên trong 1 ảnh
+   nhúng, phải quét pixel), ranh giới hàng/cột CHÍNH XÁC ngay, kể cả khi 1
+   Ô chứa nhiều đoạn cách nhau bằng dòng trống (case thật: cột "Notes" có
+   3 câu trong CÙNG 1 hàng "Type-1" — đường (2) suy đoán theo khoảng cách
+   dòng OCR sẽ tưởng nhầm 3 hàng riêng).
+2. **Không có viền vẽ** (vd. bảng STRIDE của user — chỉ màu nền xen kẽ +
+   khoảng trắng, dò pixel không ra gì): OCR bằng Vision (`ocr_cli`, qua
+   `ocr_pdf.py`) 2 lượt — lượt 1 tìm ranh giới CỘT từ khoảng trắng thật
+   giữa các dòng "hẹp" (dòng rộng bất thường bị nghi Vision gộp nhầm 2 cột
+   liền kề); lượt 2 OCR LẠI riêng từng dải cột theo ranh giới đó (tránh
+   gộp cột). Hàng: mỗi cột tự gom hàng riêng, lấy cột đếm được NHIỀU hàng
+   nhất làm tham chiếu, mọi dòng OCR gán lại theo TÂM gần nhất với hàng
+   tham chiếu — đã kiểm chứng khớp 100% trên bảng STRIDE thật của user.
 
+Xem docstring `_ocr_table_grid()` để biết đầy đủ lý do từng bước (đã thử —
+thất bại — sửa qua nhiều vòng lặp, cả 2 đường).
+
+- `_detect_grid_lines(page, region, dpi=300)` — đường (1): quét pixel tìm
+  hàng/cột có tỷ lệ pixel TỐI (`GRID_LINE_DARK_THRESHOLD`) vượt
+  `GRID_LINE_DARK_FRACTION` (đường kẻ thật chạy suốt bảng, khác chữ OCR
+  thưa không bao giờ đạt tỷ lệ này). Trả về (row_bounds, col_bounds,
+  border_color) — border_color là màu THẬT trung bình mọi pixel viền
+  (dùng để vẽ lại đúng màu, không hardcode đen). None nếu < 2 đường kẻ ở 1
+  trong 2 chiều → `_ocr_table_grid()` rơi về đường (2). Gọi bởi:
+  `_ocr_table_grid()`.
+- `_ocr_grid_from_borders(page, region, row_bounds, col_bounds, ocr_binary)`
+  — dựng lưới Ô từ ranh giới đường (1): OCR riêng từng dải CỘT (cùng lý do
+  lượt 2 của đường (2)), gán mỗi dòng OCR vào đúng Ô theo TÂM rơi giữa cặp
+  ranh giới nào — không suy đoán hàng qua khoảng cách dòng nữa vì ranh
+  giới đã BIẾT CHÍNH XÁC. Gọi bởi: `_ocr_table_grid()`.
 - `_ocr_region(page, rect, ocr_binary, dpi=300)` — OCR 1 vùng, trả về list
-  dòng (rect tuyệt đối + text). Gọi bởi: `_ocr_table_grid()`.
-- `_column_boundaries(lines, region)` — ranh giới cột từ khoảng trắng thật
-  giữa dòng "hẹp" (`NARROW_LINE_MAX_WIDTH`, loại dòng nghi gộp 2 cột).
-  None nếu < 2 cột. Gọi bởi: `_ocr_table_grid()`.
-- `_column_row_bands(lines)` — 1 cột (đã sort theo y0) → list dải hàng, gộp
-  dòng cách nhau dưới `ROW_GAP_FACTOR × chiều cao dòng trung bình` (word-
-  wrap trong 1 Ô). Gọi theo TỪNG CỘT RIÊNG (đã thử gộp chung mọi cột rồi
-  sort theo y0 — THẤT BẠI, các cột xen kẽ Y làm khoảng cách đo được vô
-  nghĩa). Gọi bởi: `_ocr_table_grid()`.
-- `_ocr_table_grid(page, region, ocr_binary)` — API chính: OCR 2 lượt +
-  dựng lưới hàng/cột như mô tả trên. Trả về None nếu không đủ tin cậy là
-  bảng (< `MIN_LINES_FOR_TABLE`, < `MIN_COLUMNS_FOR_TABLE`, hoặc <
-  `MIN_ROWS_FOR_TABLE`) — an toàn hơn đoán bừa, nơi gọi giữ nguyên ảnh gốc.
-  Gọi: `_ocr_region()`, `_column_boundaries()`, `_column_row_bands()`. Gọi
-  bởi: `translate_image_tables()`.
+  dòng (rect tuyệt đối + text). Gọi bởi: `_ocr_table_grid()`,
+  `_ocr_grid_from_borders()`.
+- `_column_boundaries(lines, region)` — đường (2): ranh giới cột từ khoảng
+  trắng thật giữa dòng "hẹp" (`NARROW_LINE_MAX_WIDTH`, loại dòng nghi gộp
+  2 cột). None nếu < 2 cột. Gọi bởi: `_ocr_table_grid()`.
+- `_column_row_bands(lines)` — đường (2): 1 cột (đã sort theo y0) → list
+  dải hàng, gộp dòng cách nhau dưới `ROW_GAP_FACTOR × chiều cao dòng
+  trung bình` (word-wrap trong 1 Ô). Gọi theo TỪNG CỘT RIÊNG (đã thử gộp
+  chung mọi cột rồi sort theo y0 — THẤT BẠI, các cột xen kẽ Y làm khoảng
+  cách đo được vô nghĩa). Gọi bởi: `_ocr_table_grid()`.
+- `_ocr_table_grid(page, region, ocr_binary)` — API chính: thử đường (1)
+  trước (`_detect_grid_lines()` + `_ocr_grid_from_borders()`), rơi về
+  đường (2) nếu không dò được viền. Trả về None nếu không đủ tin cậy là
+  bảng ở CẢ 2 đường — an toàn hơn đoán bừa, nơi gọi giữ nguyên ảnh gốc.
+  Gọi bởi: `translate_image_tables()`.
 - `_drop_nested_regions(regions)` — loại rect ẢNH nào NẰM GỌN trong 1 rect
   ảnh KHÁC lớn hơn trong cùng `image_rects`. Root cause thật: nhiều PDF
   ghép 1 bảng-ảnh từ NHIỀU lớp ảnh chồng nhau (ảnh khung viền trang trí +
@@ -385,24 +411,40 @@ biết đầy đủ lý do từng bước (đã thử — thất bại — sửa
   các pipeline khác đã kiểm chứng kỹ). Nếu ước lượng dòng bị thiếu,
   `fit_and_draw()` tự giãn xuống `max_y1` (đáy `rect` gốc) như bình
   thường, không bao giờ tràn ra ngoài ô. Gọi bởi: `translate_image_tables()`.
+- `_header_ink_color(page, sample_rect, bg_color)` — màu chữ HÀNG TIÊU ĐỀ,
+  KHÔNG dùng `_detect_ink_color()` (ocr_pdf.py, 2-means rồi lấy TRUNG BÌNH
+  cả cụm nhỏ hơn): chữ tiêu đề mảnh/nhỏ khiến pixel RÌA khử răng cưa áp
+  đảo về số lượng trong đúng cụm "chữ", kéo trung bình lệch hẳn về phía
+  nền (case thật: bảng SOC-1/SOC-2 của user ra (182,224,242) xanh nhạt
+  thay vì trắng, dù pixel trắng tinh THẬT SỰ tồn tại — chỉ là thiểu số bị
+  pha loãng). Lấy trực tiếp nhóm pixel LỆCH XA `bg_color` (đã biết trước
+  qua `local_bg_color()`) NHẤT theo NGƯỠNG TỶ LỆ so với khoảng cách xa
+  nhất tìm được (>= 85%, KHÔNG phải top-N% cố định — N% cố định vẫn lẫn
+  pixel rìa nếu tỷ lệ pixel lõi thật ít hơn N%, đã tái hiện). Bắt buộc
+  dùng `sample_rect` (bbox OCR khít 1 dòng, KHÔNG phải `cell["rect"]` đầy
+  đủ — khung Ô đầy đủ chạm viền lưới, viền đen còn lệch xa nền hơn cả chữ
+  trắng, thắng nhầm phép so sánh — đã tái hiện ra (0,0,0) đen). Gọi bởi:
+  `translate_image_tables()`.
 - `translate_image_tables(page, image_rects, router, ocr_binary=None)` —
   API chính. Với mỗi ảnh (sau `_drop_nested_regions()`) dựng được lưới
   bảng: lấy mẫu màu nền/cỡ chữ TỪNG Ô + màu chữ (hàng tiêu đề lấy mẫu
-  riêng qua `_detect_ink_color()` — nền tương phản đổi tuỳ bảng; phần
+  riêng qua `_header_ink_color()` — nền tương phản đổi tuỳ bảng; phần
   thân dùng 1 màu ĐEN đồng nhất `_BODY_INK`, không lấy mẫu từng ô — lấy
   mẫu riêng lẻ đã gặp thực tế 1-2 ô ra màu lệch dù cả bảng gốc chỉ 1 màu)
   TRƯỚC khi xoá ảnh gốc, dịch qua `translate_units_with_code_awareness()`
   (`enforce_length_guard=False` — cùng lý do `office_translate.py`: guard
   đó cho khung CỐ ĐỊNH, ở đây `fit_and_draw()` đã tự co chữ), xoá ảnh
   (`add_redact_annot`+`apply_redactions(images=PDF_REDACT_IMAGE_REMOVE)`),
-  vẽ lại nền + chữ (hàng tiêu đề in đậm, mọi ô canh giữa dọc qua
+  vẽ lại nền + VIỀN LƯỚI THẬT nếu `grid` có `row_bounds` (chỉ đường (1) có
+  — đúng màu `border_color` đã lấy mẫu, theo yêu cầu "giữ nguyên màu viền
+  của bảng") + chữ (hàng tiêu đề in đậm, mọi ô canh giữa dọc qua
   `_vcentered_rect()`). Trả về list rect đã thay thế thành công — nơi gọi
   phải loại các rect này khỏi `page_image_rects()`/Image Collision Guard
   sau đó (ảnh gốc không còn tồn tại). Gọi: `_ocr_table_grid()`,
-  `_drop_nested_regions()`, `_vcentered_rect()`, `local_bg_color()`,
-  `fit_and_draw()` (translator_engine.py), `translate_units_with_code_
-  awareness()` (code_blocks.py), `_detect_ink_color()`/`_estimate_font_
-  size()` (ocr_pdf.py). Gọi bởi: `process_pdf()`.
+  `_drop_nested_regions()`, `_vcentered_rect()`, `_header_ink_color()`,
+  `local_bg_color()`, `fit_and_draw()` (translator_engine.py),
+  `translate_units_with_code_awareness()` (code_blocks.py),
+  `_estimate_font_size()` (ocr_pdf.py). Gọi bởi: `process_pdf()`.
 
 ### office_translate.py (dịch trực tiếp .docx/.pptx, giữ nguyên định dạng)
 - `FONT_SHRINK_MIN_SCALE` (0.55) / `FONT_SHRINK_MIN_SCALE_TABLE` (0.40) —
@@ -858,4 +900,9 @@ chỉ chú thích trong code mới dịch.
   loại, rect chỉ chồng lấn 1 phần thì giữ cả 2), `_estimate_line_count()`
   (đoạn dài trong khung hẹp phải ra nhiều dòng hơn đoạn ngắn; khung rộng=0
   không chia 0), `_vcentered_rect()` (chữ ngắn trong ô cao bị đẩy xuống
-  gần giữa, đáy khung không đổi; chữ gần lấp đầy ô không bị đẩy quá đà).
+  gần giữa, đáy khung không đổi; chữ gần lấp đầy ô không bị đẩy quá đà),
+  `_detect_grid_lines()` (dựng 1 trang PDF thật có vẽ lưới 2x2 — dò đúng
+  3 đường kẻ ngang + 3 dọc, màu viền gần đen; trang trắng không viền ->
+  None, không báo động giả), `_header_ink_color()` (case thật SOC-1/SOC-2:
+  chữ trắng mảnh trên nền xanh đậm phải dò ra gần trắng, không lệch xanh
+  nhạt như `_detect_ink_color()` cũ).

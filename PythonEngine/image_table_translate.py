@@ -2,16 +2,16 @@
 phải chữ thật — get_text() không đọc được gì trong đó, khác hẳn bảng thật
 mà translator_engine.py::build_table_cell_units() xử lý qua find_tables()).
 
-OCR bằng Vision (ocr_cli, xem ocr_pdf.py), dựng lại lưới hàng/cột từ VỊ TRÍ
-chữ OCR — KHÔNG dò đường kẻ pixel như ocr_pdf.py::_detect_vertical_grid_
-lines(): đã kiểm chứng thực tế trên ảnh bảng thật của user (STRIDE table),
-ảnh loại này thường KHÔNG có đường viền vẽ thật, chỉ dùng màu nền xen kẽ +
-khoảng trắng để phân tách — dò pixel tối không tìm thấy gì. Dịch từng ô,
-xoá ảnh gốc, vẽ lại bằng vector THẬT (không phải ảnh) với màu nền LẤY MẪU
-từ chính ảnh gốc (giữ đúng bố cục/màu nền bảng). Màu chữ: hàng tiêu đề lấy
-mẫu riêng (nền tương phản đổi tuỳ bảng), phần thân dùng 1 màu đồng nhất
-thay vì lấy mẫu từng ô — xem `_BODY_INK`. Chữ canh giữa theo chiều dọc
-trong từng ô, tiêu đề in đậm.
+OCR bằng Vision (ocr_cli, xem ocr_pdf.py), dựng lại lưới hàng/cột theo 2
+đường tuỳ ảnh: (1) ảnh CÓ viền vẽ thật (vd. bảng SOC-1/SOC-2 của user) —
+dò trực tiếp bằng pixel (`_detect_grid_lines()`), chính xác nhất, ưu tiên
+trước; (2) ảnh KHÔNG có viền (vd. bảng STRIDE của user — chỉ màu nền xen
+kẽ + khoảng trắng, dò pixel không ra gì) — suy đoán từ VỊ TRÍ chữ OCR
+(`_column_row_bands()`). Dịch từng ô, xoá ảnh gốc, vẽ lại bằng vector THẬT
+(không phải ảnh) với màu nền LẤY MẪU từ chính ảnh gốc (giữ đúng bố cục/
+màu nền bảng). Màu chữ: hàng tiêu đề lấy mẫu riêng (nền tương phản đổi
+tuỳ bảng), phần thân dùng 1 màu đồng nhất thay vì lấy mẫu từng ô — xem
+`_BODY_INK`. Chữ canh giữa theo chiều dọc trong từng ô, tiêu đề in đậm.
 
 ponytail: import `fit_and_draw`/`local_bg_color` cục bộ bên trong hàm cần
 dùng (không import ở đầu file) — translator_engine.py sẽ gọi module này,
@@ -25,7 +25,7 @@ import tempfile
 
 import fitz  # PyMuPDF
 
-from ocr_pdf import DEFAULT_OCR_BINARY, _detect_ink_color, _estimate_font_size
+from ocr_pdf import DEFAULT_OCR_BINARY, _estimate_font_size
 
 # Dòng OCR rộng hơn ngưỡng này bị nghi là Vision gộp nhầm 2 CỘT liền kề
 # thành 1 dòng (biết trước qua ocr_pdf.py) — loại khỏi bước tìm ranh giới
@@ -171,25 +171,129 @@ def _column_row_bands(lines):
     return bands
 
 
+# Ngưỡng xám (0-255) coi là "tối" (pixel thuộc đường kẻ đen/xám đậm).
+GRID_LINE_DARK_THRESHOLD = 120
+# Tỷ lệ pixel tối tối thiểu trên 1 hàng/cột pixel để coi là 1 đường kẻ
+# lưới THẬT chạy suốt bảng — chữ OCR bình thường (thưa, không phải gạch
+# liền) không bao giờ đạt tỷ lệ này, chỉ đường viền vẽ sẵn mới đạt.
+GRID_LINE_DARK_FRACTION = 0.5
+
+
+def _detect_grid_lines(page, region, dpi=300):
+    """Dò đường kẻ lưới THẬT bằng pixel — `page.get_drawings()` (vector
+    graphics) không đọc được đường kẻ vẽ SẴN BÊN TRONG 1 ảnh nhúng (khác
+    hẳn `find_tables()`/`_fill_bands()` translator_engine.py dùng cho
+    bảng THẬT, không phải ảnh). Nhiều bảng-ảnh CÓ viền vẽ rõ ràng (vd.
+    bảng SOC-1/SOC-2 của user — viền đen liền mạch quanh mọi ô) — khi có,
+    đây là nguồn THẬT đáng tin hơn hẳn suy đoán từ vị trí chữ OCR
+    (`_column_row_bands()` bên dưới): case thật đã gặp — cột "Notes" có 3
+    câu cách nhau bằng dòng trống trong CÙNG 1 hàng "Type-1", suy đoán
+    theo khoảng cách dòng OCR tưởng nhầm 3 câu đó là 3 hàng riêng, khiến
+    nhãn "Type-1" chỉ được gán vào đúng 1 phần nhỏ thay vì trọn hàng.
+
+    Trả về (row_bounds, col_bounds, border_color) — 2 toạ độ TUYỆT ĐỐI
+    trên trang của mọi đường kẻ ngang/dọc đủ đậm (`GRID_LINE_DARK_
+    FRACTION`), và màu THẬT của các pixel đường kẻ đó (trung bình mọi
+    pixel tối trên toàn vùng — dùng để vẽ lại đúng màu viền gốc, theo
+    đúng yêu cầu "giữ nguyên màu viền của bảng"). None nếu tìm được < 2
+    đường kẻ ở 1 trong 2 chiều (bảng không có viền vẽ thật — case STRIDE
+    của user, xem fallback theo vị trí chữ trong `_ocr_table_grid()`)."""
+    import numpy as np
+
+    pix = page.get_pixmap(dpi=dpi, clip=region)
+    w, h = pix.width, pix.height
+    buf = np.frombuffer(pix.samples, dtype=np.uint8).reshape(h, w, pix.n)
+    dark_mask = buf[:, :, :3].mean(axis=2) < GRID_LINE_DARK_THRESHOLD
+
+    def _line_positions(dark_frac):
+        idxs = [i for i, f in enumerate(dark_frac) if f > GRID_LINE_DARK_FRACTION]
+        groups = []
+        for i in idxs:
+            if groups and i - groups[-1][-1] <= 2:
+                groups[-1].append(i)
+            else:
+                groups.append([i])
+        return [sum(g) / len(g) for g in groups]
+
+    row_px = _line_positions(dark_mask.mean(axis=1))
+    col_px = _line_positions(dark_mask.mean(axis=0))
+    if len(row_px) < 2 or len(col_px) < 2:
+        return None
+    row_bounds = [region.y0 + y / dpi * 72 for y in row_px]
+    col_bounds = [region.x0 + x / dpi * 72 for x in col_px]
+    dark_pixels = buf[:, :, :3][dark_mask]
+    border_color = tuple(int(round(v)) for v in dark_pixels.mean(axis=0)) if len(dark_pixels) else (0, 0, 0)
+    return row_bounds, col_bounds, border_color
+
+
+def _ocr_grid_from_borders(page, region, row_bounds, col_bounds, ocr_binary):
+    """Dựng lưới Ô từ ranh giới đường kẻ THẬT (`_detect_grid_lines()`) —
+    OCR riêng từng dải CỘT (cùng lý do lượt 2 của `_ocr_table_grid()`:
+    tránh Vision gộp nhầm 2 cột liền kề), rồi gán mỗi dòng OCR vào đúng Ô
+    theo TÂM của nó rơi giữa cặp ranh giới hàng/cột nào — không cần suy
+    đoán hàng qua khoảng cách dòng nữa vì ranh giới đã BIẾT CHÍNH XÁC, nên
+    1 Ô chứa nhiều đoạn cách dòng trống (như cột "Notes" ở case thật) vẫn
+    gộp đúng vào 1 hàng logic duy nhất. Trả về None nếu không dòng OCR nào
+    khớp được vào Ô nào cả (lưới dò được có thể chỉ là khung trang trí
+    không có chữ thật bên trong)."""
+    n_rows = len(row_bounds) - 1
+    n_cols = len(col_bounds) - 1
+    cells = {}
+    for c in range(n_cols):
+        strip_rect = fitz.Rect(col_bounds[c], region.y0, col_bounds[c + 1], region.y1)
+        strip_lines = sorted(_ocr_region(page, strip_rect, ocr_binary), key=lambda l: l["rect"].y0)
+        for l in strip_lines:
+            yc = (l["rect"].y0 + l["rect"].y1) / 2
+            r = next((i for i in range(n_rows) if row_bounds[i] <= yc < row_bounds[i + 1]), None)
+            if r is None:
+                continue
+            key = (r, c)
+            full_rect = fitz.Rect(col_bounds[c], row_bounds[r], col_bounds[c + 1], row_bounds[r + 1])
+            if key not in cells:
+                cells[key] = {
+                    "rect": full_rect, "text": l["text"],
+                    "sample_rect": l["rect"], "sample_text": l["text"],
+                }
+            else:
+                cells[key]["text"] += " " + l["text"]
+    if not cells:
+        return None
+    return {"col_bounds": col_bounds, "cells": cells, "n_rows": n_rows, "n_cols": n_cols}
+
+
 def _ocr_table_grid(page, region, ocr_binary):
     """OCR `region` (ảnh nhúng, toạ độ tuyệt đối) và dựng lại thành lưới
-    hàng x cột. Trả về None nếu KHÔNG đủ tin cậy để coi là bảng (quá ít
-    chữ, hoặc không tìm được ≥2 cột/≥2 hàng) — an toàn hơn là đoán bừa,
-    nơi gọi giữ nguyên ảnh gốc trong trường hợp đó.
+    hàng x cột. Trả về None nếu KHÔNG đủ tin cậy để coi là bảng, an toàn
+    hơn là đoán bừa, nơi gọi giữ nguyên ảnh gốc trong trường hợp đó.
 
-    Thuật toán hàng (đã kiểm chứng trên ảnh bảng thật của user — STRIDE
-    table, khớp 100% với bảng gốc sau khi hiệu chỉnh): mỗi cột tự gom
-    hàng riêng qua `_column_row_bands()` (không phải cột nào cũng đúng —
-    cột có Ô word-wrap phức tạp dễ gom sai số hàng), lấy CỘT CHO NHIỀU
-    HÀNG NHẤT làm "hàng tham chiếu" (dưới-đếm luôn nguy hiểm hơn — gộp
-    nhầm 2 hàng thật thành 1 — nên tin cột đếm được NHIỀU nhất). Mọi dòng
-    OCR (kể cả của chính cột tham chiếu) sau đó gán lại vào hàng tham
+    2 đường: (1) có viền vẽ thật (`_detect_grid_lines()` dò được pixel) —
+    ranh giới hàng/cột lấy THẲNG từ đó, chính xác nhất, ưu tiên trước; (2)
+    KHÔNG có viền vẽ (STRIDE table của user — chỉ màu nền xen kẽ + khoảng
+    trắng) — suy đoán từ vị trí chữ OCR như dưới đây.
+
+    Thuật toán hàng của đường (2) (đã kiểm chứng trên ảnh bảng thật của
+    user — STRIDE table, khớp 100% với bảng gốc sau khi hiệu chỉnh): mỗi
+    cột tự gom hàng riêng qua `_column_row_bands()` (không phải cột nào
+    cũng đúng — cột có Ô word-wrap phức tạp dễ gom sai số hàng), lấy CỘT
+    CHO NHIỀU HÀNG NHẤT làm "hàng tham chiếu" (dưới-đếm luôn nguy hiểm hơn
+    — gộp nhầm 2 hàng thật thành 1 — nên tin cột đếm được NHIỀU nhất). Mọi
+    dòng OCR (kể cả của chính cột tham chiếu) sau đó gán lại vào hàng tham
     chiếu có TÂM (không phải RÌA — rìa test sai 1 dòng ở biên mơ hồ) gần
     nhất, không dùng lại kết quả gom-theo-cột ban đầu của các cột khác.
 
     Trả về (dict): {"col_bounds": [...], "cells": {(row_idx, col_idx):
     {"rect": fitz.Rect hợp nhất mọi dòng con, "text": str đã nối các dòng
     con}}, "n_rows": int, "n_cols": int}."""
+    grid_lines = _detect_grid_lines(page, region)
+    if grid_lines is not None:
+        row_bounds, col_bounds, border_color = grid_lines
+        if len(row_bounds) - 1 >= MIN_ROWS_FOR_TABLE and len(col_bounds) - 1 >= MIN_COLUMNS_FOR_TABLE:
+            grid = _ocr_grid_from_borders(page, region, row_bounds, col_bounds, ocr_binary)
+            if grid is not None:
+                grid["row_bounds"] = row_bounds
+                grid["border_color"] = border_color
+                return grid
+
     pass1 = _ocr_region(page, region, ocr_binary)
     if len(pass1) < MIN_LINES_FOR_TABLE:
         return None
@@ -274,6 +378,42 @@ def _drop_nested_regions(regions):
     return kept
 
 
+def _header_ink_color(page, sample_rect, bg_color):
+    """Màu chữ HÀNG TIÊU ĐỀ — không dùng `_detect_ink_color()` (ocr_pdf.py,
+    2-means rồi lấy TRUNG BÌNH cả cụm nhỏ hơn) trực tiếp ở đây: đã tái hiện
+    thực tế trên bảng SOC-1/SOC-2 của user — chữ tiêu đề mảnh/nhỏ khiến
+    pixel RÌA khử răng cưa (anti-alias, pha trộn giữa trắng và nền xanh)
+    áp đảo về SỐ LƯỢNG trong đúng cụm "chữ" đó, kéo trung bình lệch hẳn về
+    phía màu nền (ra (182,224,242) xanh nhạt thay vì trắng), dù pixel
+    TRẮNG TINH (255,255,255) thật sự vẫn tồn tại trong vùng — chỉ là
+    thiểu số bị pha loãng mất khi tính trung bình cả cụm.
+
+    Lấy trực tiếp nhóm pixel LỆCH XA màu nền `bg_color` (đã biết trước qua
+    `local_bg_color()` — không cần đoán lại) NHẤT rồi mới lấy trung bình
+    CHỈ nhóm đó — không bị pha loãng bởi khối lớn pixel rìa gần nền. Ngưỡng
+    theo TỶ LỆ so với khoảng cách XA NHẤT tìm được (>= 85%), KHÔNG phải
+    top-N% cố định: chữ càng mảnh/nhỏ thì tỷ lệ pixel lõi thật càng ít
+    (case thật < 1% tổng vùng) — top-N% cố định vẫn lẫn nhiều pixel rìa pha
+    trộn nếu N% lớn hơn tỷ lệ lõi thật đó, kéo trung bình lệch màu (đã tái
+    hiện: pha loãng còn (162,214,239) xanh nhạt thay vì trắng với ảnh chữ
+    quá mảnh). Bắt buộc dùng `sample_rect` (bbox OCR khít 1 dòng chữ,
+    KHÔNG phải khung Ô đầy đủ `cell["rect"]`): khung Ô đầy đủ chạm tới
+    đúng đường viền lưới (`_detect_grid_lines()`) — viền đen/xám đậm còn
+    LỆCH XA màu nền hơn cả chữ trắng thật, sẽ thắng nhầm phép so sánh này
+    (đã tái hiện: ra (0,0,0) đen thay vì trắng khi lỡ dùng `cell["rect"]`)."""
+    import numpy as np
+
+    clip = sample_rect & page.rect
+    pix = page.get_pixmap(clip=clip, matrix=fitz.Matrix(4, 4))
+    arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(-1, pix.n)[:, :3].astype(np.float64)
+    if len(arr) == 0:
+        return (255, 255, 255)
+    bg = np.array([c * 255 for c in bg_color])
+    dist = np.sum((arr - bg) ** 2, axis=1)
+    top = arr[dist >= dist.max() * 0.85]
+    return tuple(int(round(v)) for v in top.mean(axis=0))
+
+
 def translate_image_tables(page, image_rects, router, ocr_binary=None):
     """Với mỗi ảnh trong `image_rects` (rect tuyệt đối trên trang) trông
     giống 1 bảng chữ (OCR ra đủ chữ VÀ dựng được lưới ≥2 cột x ≥2 hàng —
@@ -309,11 +449,13 @@ def translate_image_tables(page, image_rects, router, ocr_binary=None):
         cell_info = []
         for (row, _col), cell in grid["cells"].items():
             rect = cell["rect"]
+            bg = local_bg_color(page, rect, pad=0)
             cell_info.append({
                 "row": row,
                 "rect": rect,
+                "sample_rect": cell["sample_rect"],
                 "original": cell["text"],
-                "bg": local_bg_color(page, rect, pad=0),
+                "bg": bg,
                 "size": _estimate_font_size(
                     cell["sample_text"], cell["sample_rect"].width, cell["sample_rect"].height,
                 ),
@@ -322,7 +464,7 @@ def translate_image_tables(page, image_rects, router, ocr_binary=None):
         header_ink = _BODY_INK
         for info in cell_info:
             if info["row"] == 0:
-                header_ink = _detect_ink_color(page, info["rect"])
+                header_ink = _header_ink_color(page, info["sample_rect"], info["bg"])
                 break
         for info in cell_info:
             info["ink"] = header_ink if info["row"] == 0 else _BODY_INK
@@ -348,6 +490,21 @@ def translate_image_tables(page, image_rects, router, ocr_binary=None):
 
         for info in cell_info:
             page.draw_rect(info["rect"], fill=info["bg"], color=None)
+
+        # Vẽ lại đúng đường kẻ lưới GỐC nếu ảnh gốc CÓ viền vẽ thật (chỉ
+        # `grid` từ đường dò-pixel `_detect_grid_lines()` mới có key này —
+        # đường suy đoán theo vị trí chữ, vd STRIDE, không có viền để vẽ
+        # lại). Theo đúng yêu cầu "giữ nguyên màu viền của bảng": màu lấy
+        # từ chính pixel viền gốc (`border_color`), không hardcode đen.
+        if "row_bounds" in grid:
+            border_rgb = tuple(c / 255 for c in grid["border_color"])
+            for y in grid["row_bounds"]:
+                page.draw_line(fitz.Point(region.x0, y), fitz.Point(region.x1, y),
+                                color=border_rgb, width=0.75)
+            for x in grid["col_bounds"]:
+                page.draw_line(fitz.Point(x, region.y0), fitz.Point(x, region.y1),
+                                color=border_rgb, width=0.75)
+
         for info in cell_info:
             translated = info["translated"]
             if not translated.strip():
