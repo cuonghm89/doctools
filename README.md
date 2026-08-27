@@ -118,6 +118,18 @@ của DeepL.
   graphics), và mọi ô trong cùng 1 cột được canh về đúng 1 mốc x0 (gom
   cụm theo khoảng cách, không theo chỉ số cột — `find_tables()` có thể
   báo chỉ số cột khác nhau cho cùng 1 cột hiển thị).
+- **Bảng-ẢNH dịch qua OCR** (`image_table_translate.py::
+  translate_image_tables()`): bảng vẽ dưới dạng ảnh (screenshot dán vào
+  tài liệu, không phải chữ thật) được OCR bằng Vision (`ocr_cli`), dựng
+  lại lưới hàng/cột từ VỊ TRÍ chữ OCR (không dò đường kẻ pixel — nhiều
+  ảnh loại này không có viền vẽ thật), dịch từng ô rồi xoá ảnh gốc vẽ lại
+  bằng vector thật: nền lấy mẫu từ ảnh gốc, hàng tiêu đề in đậm + màu chữ
+  lấy mẫu riêng, phần thân dùng 1 màu chữ đồng nhất (mặc định đen, khớp
+  quy ước phổ biến của tài liệu thay vì lấy mẫu từng ô dễ bị nhiễu), mọi ô
+  canh giữa theo chiều dọc. Ảnh nào bị nhiều lớp ảnh chồng lồng nhau (kiểu
+  ghép khung viền + nội dung khi export từ PowerPoint/Word) chỉ xử lý 1
+  lần trên lớp lớn nhất, tránh dịch chồng 2 lần. Ảnh không đủ tin cậy là
+  bảng (ít chữ, không thấy lưới rõ) giữ nguyên không đụng tới.
 
 ## Giới hạn đã biết (cố ý, không phải bug)
 
@@ -130,10 +142,11 @@ của DeepL.
   thật cho từng ngôn ngữ: comment nằm trong 1 chuỗi ký tự dài/nhiều dòng có
   thể bị tách nhầm, và comment khối nhiều dòng (`/* ... */` tràn dòng,
   `<!-- -->`) không được xử lý — dòng đó giữ nguyên, không dịch.
-- Bảng vẽ dưới dạng ẢNH (screenshot dán vào tài liệu, không phải chữ thật)
-  không dịch được — `get_text()` không đọc được gì trong 1 vùng ảnh. Chỉ
-  trang SCAN TOÀN BỘ (không có chữ thật ở bất kỳ đâu) mới được tự OCR; 1
-  bảng-ảnh nằm giữa các đoạn chữ thật khác trên cùng trang thì không.
+- Bảng vẽ dưới dạng ẢNH (screenshot dán vào tài liệu) không thấy chữ thật
+  qua `get_text()`, nhưng nếu OCR ra đủ chữ VÀ dựng được lưới ≥2 cột x ≥2
+  hàng thì vẫn được tự động dịch (`image_table_translate.py`, xem README
+  mục bên dưới) — chỉ ảnh quá ít chữ hoặc không thấy lưới rõ (nghi logo/
+  sơ đồ/ảnh chụp thường) mới giữ nguyên không đụng tới.
 - API key được lưu trong **Keychain** (`KeychainStore.swift`, không còn
   `UserDefaults`/plain text). Vì app chỉ ký ad-hoc (chưa có Apple Developer
   ID), chữ ký đổi mỗi lần đóng gói lại → macOS coi mỗi bản release là "app

@@ -525,6 +525,21 @@ def process_pdf(input_pdf, output_pdf, router, max_pages=0):
         groups = merge_paragraph_blocks(blocks)
         all_bboxes = [g["bbox"] for g in groups]
         image_rects = page_image_rects(page)
+
+        # Ảnh-chụp-bảng (screenshot dán vào tài liệu, không phải chữ thật —
+        # get_text() không đọc được gì trong đó): OCR + dịch riêng theo ô,
+        # xoá ảnh gốc, vẽ lại bằng vector. Chạy SAU khi đã đọc xong
+        # blocks/groups ở trên (không ảnh hưởng snapshot đó) nhưng TRƯỚC
+        # pipeline đoạn văn bên dưới, vì ảnh đã được thay bằng vector thật
+        # thì không còn là "ảnh" nữa — phải loại khỏi image_rects để Image
+        # Collision Guard không còn chặn nhầm các khối chữ THẬT ở gần đó.
+        # Import cục bộ: xem docstring image_table_translate.py — tránh
+        # vòng lặp import.
+        from image_table_translate import translate_image_tables
+        replaced_image_rects = translate_image_tables(page, image_rects, router)
+        if replaced_image_rects:
+            image_rects = [r for r in image_rects if r not in replaced_image_rects]
+
         pending = []  # (rect, chữ_đã_dịch, cỡ_chữ_gốc, màu, style, max_y1)
 
         # Dịch cả trang trong 1 lần gọi theo batch thay vì 1 lần gọi mạng

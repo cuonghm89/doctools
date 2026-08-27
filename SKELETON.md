@@ -25,6 +25,7 @@ PDF Tools/
 │       └── main.swift                     # binary OCR riêng (Vision framework)
 └── PythonEngine/                          # engine xử lý PDF/Word/PPTX, chạy qua subprocess
     ├── translator_engine.py               # pipeline DỊCH PDF + entry point chung (main())
+    ├── image_table_translate.py           # dịch bảng vẽ dưới dạng ẢNH (screenshot) trong PDF, OCR+dựng lưới
     ├── office_translate.py                # pipeline DỊCH .docx/.pptx (giữ nguyên định dạng)
     ├── pdf_convert.py                     # xuất Word/PPTX từ PDF (độc lập pipeline dịch)
     ├── convert_cli.py                     # CLI wrapper cho pdf_convert.py
@@ -61,6 +62,7 @@ graph LR
 
     subgraph Python["PythonEngine (Python)"]
         TE[translator_engine.py]
+        ITT[image_table_translate.py]
         OT[office_translate.py]
         PC[pdf_convert.py]
         RO[router.py]
@@ -84,6 +86,8 @@ graph LR
     TE --> PA
     TE --> OC
     TE --> OT
+    TE -. import cục bộ, 2 chiều .-> ITT
+    ITT --> OC
     OT --> RO
     OT --> CB
     CB --> RO
@@ -105,8 +109,11 @@ graph LR
   redaction — bảng THẬT phát hiện qua `find_tables()` được dịch/vẽ riêng
   theo từng Ô TRƯỚC, tách khỏi pipeline đoạn văn thường bên dưới, vì
   `get_text("dict")` tự đọc sai thứ tự cho bảng nhiều dòng-cao-khác-nhau —
-  xem CODEMAP.md mục `build_table_cell_units()`); `.docx`/`.pptx` →
-  `translate_docx()`/`translate_pptx()`
+  xem CODEMAP.md mục `build_table_cell_units()`; bảng vẽ dưới dạng ẢNH —
+  screenshot dán vào tài liệu, `get_text()` không đọc được gì — cũng được
+  OCR + dịch riêng theo Ô qua `image_table_translate.py::
+  translate_image_tables()` trước pipeline đoạn văn, xem CODEMAP.md mục
+  module đó); `.docx`/`.pptx` → `translate_docx()`/`translate_pptx()`
   (`office_translate.py` — thay trực tiếp text trong run có sẵn, giữ
   nguyên mọi định dạng khác vì không đụng XML nào khác). Cả 2 nhánh gọi
   `translate_units_with_code_awareness()` (`code_blocks.py`) thay vì gọi

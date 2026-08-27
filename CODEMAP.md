@@ -310,13 +310,18 @@ thật), fix 3 vòng lặp cho tới khi số liệu khớp chính xác (không 
   units()` — dịch/vẽ riêng theo từng Ô bảng thật TRƯỚC, redact+
   `apply_redactions()` riêng cho các Ô đó; (2) đọc lại `get_text("dict")`
   (giờ đã thấy chữ Việt vừa vẽ ở bước 1), loại block nằm trong vùng bảng
-  qua `_block_mostly_in_region()` rồi mới gọi `merge_paragraph_blocks()`
-  (paragraphs.py) cho phần còn lại — 2 bước KHÔNG được đảo thứ tự. Gọi:
-  `ensure_text_layer()` (ocr_pdf.py), `page_image_rects()`,
+  qua `_block_mostly_in_region()` rồi `merge_paragraph_blocks()`
+  (paragraphs.py) cho phần còn lại — 2 bước KHÔNG được đảo thứ tự; (3) sau
+  khi có `image_rects` (`page_image_rects()`), gọi
+  `image_table_translate.py::translate_image_tables()` (import cục bộ,
+  xem mục riêng bên dưới) — ảnh nào được thay thành công thì loại luôn
+  khỏi `image_rects` để Image Collision Guard không chặn nhầm chữ thật gần
+  đó nữa. Gọi: `ensure_text_layer()` (ocr_pdf.py), `page_image_rects()`,
   `build_translation_units()`, `translate_units_with_code_awareness()`
   (code_blocks.py — thay cho gọi thẳng `router.translate_batch()`, xem
   CODEMAP mục code_blocks.py), `intersects_image()`, `growth_ceiling()`,
-  `local_bg_color()`, `fit_and_draw()`. Gọi bởi: `main()`.
+  `local_bg_color()`, `fit_and_draw()`, `translate_image_tables()`
+  (image_table_translate.py). Gọi bởi: `main()`.
 - `main()` — đọc `--config`, tạo `TranslationRouter`, TỰ NHẬN DIỆN định
   dạng theo đuôi file `input_pdf` (bất kể tên trường, chỉ là 1 path chuỗi):
   `.pdf` → `process_pdf()`; `.docx` → `translate_docx()`; `.pptx` →
@@ -325,6 +330,79 @@ thật), fix 3 vòng lặp cho tới khi số liệu khớp chính xác (không 
   ngược `emit` từ chính module này, import ở đầu file sẽ tạo vòng lặp
   import). Gọi bởi: chạy trực tiếp qua
   `python3 translator_engine.py --config ...` (từ `PythonProcess.swift`).
+
+### image_table_translate.py (dịch bảng vẽ dưới dạng ẢNH — screenshot dán
+vào tài liệu, không phải chữ thật, `get_text()` không đọc được gì trong
+đó)
+Gọi bởi: `translator_engine.py::process_pdf()` (import cục bộ, tránh vòng
+lặp — module này cũng import cục bộ `fit_and_draw`/`local_bg_color`/
+`SCALE_FACTOR` ngược lại từ `translator_engine.py` bên trong hàm cần dùng).
+
+Thuật toán dựng lưới hàng/cột: OCR bằng Vision (`ocr_cli`, qua `ocr_pdf.py`)
+2 lượt — lượt 1 tìm ranh giới CỘT từ khoảng trắng thật giữa các dòng "hẹp"
+(dòng rộng bất thường bị nghi Vision gộp nhầm 2 cột liền kề); lượt 2 OCR
+LẠI riêng từng dải cột theo ranh giới đó (tránh gộp cột). Hàng: mỗi cột tự
+gom hàng riêng, lấy cột đếm được NHIỀU hàng nhất làm tham chiếu, mọi dòng
+OCR gán lại theo TÂM gần nhất với hàng tham chiếu — đã kiểm chứng khớp
+100% trên bảng STRIDE thật của user. Xem docstring `_ocr_table_grid()` để
+biết đầy đủ lý do từng bước (đã thử — thất bại — sửa qua 3 vòng lặp).
+
+- `_ocr_region(page, rect, ocr_binary, dpi=300)` — OCR 1 vùng, trả về list
+  dòng (rect tuyệt đối + text). Gọi bởi: `_ocr_table_grid()`.
+- `_column_boundaries(lines, region)` — ranh giới cột từ khoảng trắng thật
+  giữa dòng "hẹp" (`NARROW_LINE_MAX_WIDTH`, loại dòng nghi gộp 2 cột).
+  None nếu < 2 cột. Gọi bởi: `_ocr_table_grid()`.
+- `_column_row_bands(lines)` — 1 cột (đã sort theo y0) → list dải hàng, gộp
+  dòng cách nhau dưới `ROW_GAP_FACTOR × chiều cao dòng trung bình` (word-
+  wrap trong 1 Ô). Gọi theo TỪNG CỘT RIÊNG (đã thử gộp chung mọi cột rồi
+  sort theo y0 — THẤT BẠI, các cột xen kẽ Y làm khoảng cách đo được vô
+  nghĩa). Gọi bởi: `_ocr_table_grid()`.
+- `_ocr_table_grid(page, region, ocr_binary)` — API chính: OCR 2 lượt +
+  dựng lưới hàng/cột như mô tả trên. Trả về None nếu không đủ tin cậy là
+  bảng (< `MIN_LINES_FOR_TABLE`, < `MIN_COLUMNS_FOR_TABLE`, hoặc <
+  `MIN_ROWS_FOR_TABLE`) — an toàn hơn đoán bừa, nơi gọi giữ nguyên ảnh gốc.
+  Gọi: `_ocr_region()`, `_column_boundaries()`, `_column_row_bands()`. Gọi
+  bởi: `translate_image_tables()`.
+- `_drop_nested_regions(regions)` — loại rect ẢNH nào NẰM GỌN trong 1 rect
+  ảnh KHÁC lớn hơn trong cùng `image_rects`. Root cause thật: nhiều PDF
+  ghép 1 bảng-ảnh từ NHIỀU lớp ảnh chồng nhau (ảnh khung viền trang trí +
+  ảnh nội dung nằm lồng bên trong — export từ PowerPoint/Word), `page.
+  get_images()` trả về 2 xref cho ĐÚNG 1 bảng nhìn thấy (đã tái hiện trên
+  bảng STRIDE của user). Không lọc thì cả 2 lớp bị coi là 2 "bảng" riêng,
+  OCR/dịch/vẽ 2 LẦN CHỒNG NHAU với biên khác nhau — lần 2 OCR lại chính
+  chữ tiếng Việt lớp 1 vừa vẽ (không còn là ảnh gốc), vẽ đè lệch bên
+  trong, để sót 1 dải viền chữ cũ ở mép (đã tái hiện + xác nhận hết hẳn
+  sau khi thêm hàm này qua render zoom thật, so trước/sau). Gọi bởi:
+  `translate_image_tables()`.
+- `_estimate_line_count(text, font_size, width)` — ước lượng số dòng nếu
+  word-wrap `text` ở `font_size` trong khung rộng `width` (đo độ rộng ký
+  tự thật bằng `fitz.Font` với chính font Arial dùng để vẽ chữ Việt) —
+  không cần khớp tuyệt đối với `insert_htmlbox`, chỉ đủ gần để canh giữa
+  dọc không lệch mắt. Gọi bởi: `_vcentered_rect()`.
+- `_vcentered_rect(rect, text, font_size)` — khung con canh giữa THEO
+  CHIỀU DỌC trong `rect`, làm điểm khởi đầu cho `fit_and_draw()` (không
+  sửa `fit_and_draw()`/`_render_html()` dùng chung — tránh rủi ro hồi quy
+  các pipeline khác đã kiểm chứng kỹ). Nếu ước lượng dòng bị thiếu,
+  `fit_and_draw()` tự giãn xuống `max_y1` (đáy `rect` gốc) như bình
+  thường, không bao giờ tràn ra ngoài ô. Gọi bởi: `translate_image_tables()`.
+- `translate_image_tables(page, image_rects, router, ocr_binary=None)` —
+  API chính. Với mỗi ảnh (sau `_drop_nested_regions()`) dựng được lưới
+  bảng: lấy mẫu màu nền/cỡ chữ TỪNG Ô + màu chữ (hàng tiêu đề lấy mẫu
+  riêng qua `_detect_ink_color()` — nền tương phản đổi tuỳ bảng; phần
+  thân dùng 1 màu ĐEN đồng nhất `_BODY_INK`, không lấy mẫu từng ô — lấy
+  mẫu riêng lẻ đã gặp thực tế 1-2 ô ra màu lệch dù cả bảng gốc chỉ 1 màu)
+  TRƯỚC khi xoá ảnh gốc, dịch qua `translate_units_with_code_awareness()`
+  (`enforce_length_guard=False` — cùng lý do `office_translate.py`: guard
+  đó cho khung CỐ ĐỊNH, ở đây `fit_and_draw()` đã tự co chữ), xoá ảnh
+  (`add_redact_annot`+`apply_redactions(images=PDF_REDACT_IMAGE_REMOVE)`),
+  vẽ lại nền + chữ (hàng tiêu đề in đậm, mọi ô canh giữa dọc qua
+  `_vcentered_rect()`). Trả về list rect đã thay thế thành công — nơi gọi
+  phải loại các rect này khỏi `page_image_rects()`/Image Collision Guard
+  sau đó (ảnh gốc không còn tồn tại). Gọi: `_ocr_table_grid()`,
+  `_drop_nested_regions()`, `_vcentered_rect()`, `local_bg_color()`,
+  `fit_and_draw()` (translator_engine.py), `translate_units_with_code_
+  awareness()` (code_blocks.py), `_detect_ink_color()`/`_estimate_font_
+  size()` (ocr_pdf.py). Gọi bởi: `process_pdf()`.
 
 ### office_translate.py (dịch trực tiếp .docx/.pptx, giữ nguyên định dạng)
 - `FONT_SHRINK_MIN_SCALE` (0.55) / `FONT_SHRINK_MIN_SCALE_TABLE` (0.40) —
@@ -775,3 +853,9 @@ chỉ chú thích trong code mới dịch.
   PDF thật + PDF scan giả lập (cần `ocr_cli` đã build); test
   `_detect_vertical_grid_lines()` dò đúng 1 đường kẻ vẽ sẵn ở vị trí biết
   trước, không báo động giả trên trang trắng.
+- `test_image_table_translate.py` — test `_drop_nested_regions()` (case
+  thật STRIDE: rect ảnh nội dung lồng trong rect ảnh khung viền phải bị
+  loại, rect chỉ chồng lấn 1 phần thì giữ cả 2), `_estimate_line_count()`
+  (đoạn dài trong khung hẹp phải ra nhiều dòng hơn đoạn ngắn; khung rộng=0
+  không chia 0), `_vcentered_rect()` (chữ ngắn trong ô cao bị đẩy xuống
+  gần giữa, đáy khung không đổi; chữ gần lấp đầy ô không bị đẩy quá đà).
